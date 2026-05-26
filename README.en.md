@@ -40,7 +40,7 @@ The goal is not to ship another chat wrapper. The goal is to make DeepSeek feel 
 - **Managed runtime**: use the bundled DeepSeek TUI by default, or point the app at your own `deepseek` executable.
 - **Skill and MCP support**: create Skills, edit MCP config, add common tools, and open the related folders from the UI.
 - **Claw background automation**: run a background agent alongside normal chat, with current support for Feishu / Lark, IM webhook / relay flows, and scheduled tasks.
-- **Write mode**: manage `~/.deepseekgui/write_workspace` and custom writing spaces, browse Markdown files, use live Markdown editing, preview relative images, get DeepSeek FIM short completion / inspiration completion with optional cross-document BM25 + keyword retrieval, and invoke the writing assistant directly from selected text.
+- **Write mode**: manage `~/.deepseekgui/write_workspace` and custom writing spaces, browse Markdown files, use live Markdown editing, preview relative images, get DeepSeek FIM short completion / inspiration completion with optional cross-document BM25 + keyword retrieval, export the current document as `HTML / PDF / DOC / DOCX`, and invoke the writing assistant directly from selected text.
 - **Friendly first launch**: choose language, add your DeepSeek API key, and optionally set a compatible Base URL.
 - **Local-first**: preferences, sessions, logs, and runtime config stay on your machine; model calls use your own DeepSeek API key.
 - **English and Chinese UI**: switch languages from Settings at any time.
@@ -81,6 +81,7 @@ A dedicated Markdown writing workbench that keeps writing files, save state, and
 
 - Manage `~/.deepseekgui/write_workspace` plus custom writing spaces from the left file tree.
 - Switch between **Live / Source / Split / Preview**; Live keeps Markdown source on the active line and renders the rest.
+- Export the current Markdown document from the toolbar as `HTML / PDF / DOC / DOCX`, with best-effort preservation for headings, lists, code blocks, tables, and local images.
 - DeepSeek FIM short and inspiration completion, plus selection-based inline agent actions and a right-side writing assistant for summaries, outlines, and polish.
 
 ### Claw Mode

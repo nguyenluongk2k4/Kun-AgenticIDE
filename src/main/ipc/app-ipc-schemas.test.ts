@@ -9,6 +9,7 @@ import {
   workspaceDirectoryTargetPayloadSchema,
   workspaceEntryDeletePayloadSchema,
   workspaceEntryRenamePayloadSchema,
+  writeExportPayloadSchema,
   writeInlineCompletionPayloadSchema
 } from './app-ipc-schemas'
 
@@ -137,5 +138,18 @@ describe('app-ipc-schemas', () => {
     expect(payload.mode).toBe('long')
     expect(payload.workspaceRoot).toBe('/tmp/workspace')
     expect(payload.cursor.line).toBe(3)
+  })
+
+  it('accepts write export payloads', () => {
+    const payload = writeExportPayloadSchema.parse({
+      path: '/tmp/workspace/draft.md',
+      workspaceRoot: '/tmp/workspace',
+      format: 'docx',
+      content: '# Draft'
+    })
+
+    expect(payload.path).toBe('/tmp/workspace/draft.md')
+    expect(payload.format).toBe('docx')
+    expect(payload.content).toBe('# Draft')
   })
 })

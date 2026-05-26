@@ -7,11 +7,16 @@ vi.mock('electron', () => ({
   app: {
     getFileIcon: vi.fn()
   },
+  clipboard: {
+    readImage: vi.fn()
+  },
   shell: {
     openPath: vi.fn(),
     showItemInFolder: vi.fn()
   }
 }))
+
+import { clipboard } from 'electron'
 
 import {
   createWorkspaceDirectory,
@@ -21,6 +26,7 @@ import {
   readWorkspaceFile,
   renameWorkspaceEntry,
   resolveWorkspaceFile,
+  saveWorkspaceClipboardImage,
   writeWorkspaceFile
 } from './workspace-service'
 
@@ -30,6 +36,7 @@ describe('workspace-service boundary checks', () => {
   let outsideFile = ''
 
   beforeEach(async () => {
+    vi.mocked(clipboard.readImage).mockReset()
     rootDir = await mkdtemp(join(tmpdir(), 'ds-gui-workspace-'))
     workspaceRoot = join(rootDir, 'workspace')
     outsideFile = join(rootDir, 'outside.txt')
@@ -113,6 +120,23 @@ describe('workspace-service boundary checks', () => {
     }
   })
 
+  it('marks oversized files as truncated when loading preview content', async () => {
+    const largePath = join(workspaceRoot, 'large.md')
+    await writeFile(largePath, 'a'.repeat(1_500_001), 'utf8')
+
+    const result = await readWorkspaceFile({
+      path: largePath,
+      workspaceRoot
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+
+    expect(result.truncated).toBe(true)
+    expect(result.size).toBe(1_500_001)
+    expect(result.content.length).toBeLessThan(result.size)
+  })
+
   it('creates directories inside the selected workspace', async () => {
     const result = await createWorkspaceDirectory({
       path: 'notes',
@@ -127,6 +151,29 @@ describe('workspace-service boundary checks', () => {
     if (listResult.ok) {
       expect(listResult.entries.some((entry) => entry.name === 'notes' && entry.type === 'directory')).toBe(true)
     }
+  })
+
+  it('saves pasted clipboard images into the workspace img directory and returns a markdown path', async () => {
+    const currentFilePath = join(workspaceRoot, 'notes', 'draft.md')
+    await mkdir(join(workspaceRoot, 'notes'), { recursive: true })
+    await writeFile(currentFilePath, '# draft', 'utf8')
+
+    vi.mocked(clipboard.readImage).mockReturnValue({
+      isEmpty: () => false,
+      toPNG: () => Buffer.from('fake-png-bytes')
+    } as Electron.NativeImage)
+
+    const result = await saveWorkspaceClipboardImage({
+      workspaceRoot,
+      currentFilePath
+    })
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+
+    expect(result.path).toContain(join(workspaceRoot, 'img'))
+    expect(result.markdownPath.startsWith('../img/pasted-image-')).toBe(true)
+    await expect(readFile(result.path)).resolves.toEqual(Buffer.from('fake-png-bytes'))
   })
 
   it('renames files within the selected workspace', async () => {

@@ -778,6 +778,47 @@ export function Workbench(): ReactElement {
     setRightPanelMode('browser')
   }
 
+  const renderRuntimeBanner = (message: string): ReactElement => (
+    <div className="ds-no-drag shrink-0 border-b border-amber-200/70 bg-[rgba(255,248,235,0.82)] backdrop-blur-lg dark:border-amber-800/50 dark:bg-amber-950/35">
+      <div className={`${stageInsetClass} flex w-full min-w-0 items-start justify-between gap-3 py-3`}>
+        <p className="min-w-0 flex-1 text-[14px] leading-6 text-amber-950 dark:text-amber-100">
+          {message}
+        </p>
+        <div className="flex shrink-0 items-center gap-2">
+          {runtimeConnection !== 'ready' ? (
+            <>
+              <button
+                type="button"
+                className="rounded-lg border border-amber-300/70 bg-white px-3 py-1 text-[12px] font-medium text-amber-950 transition hover:bg-amber-100/80 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-100 dark:hover:bg-amber-900/40"
+                onClick={() => void probeRuntime('user')}
+              >
+                {t('retryConnection')}
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border border-amber-300/70 bg-white px-3 py-1 text-[12px] font-medium text-amber-950 transition hover:bg-amber-100/80 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-100 dark:hover:bg-amber-900/40"
+                onClick={() => setRuntimeDiagnosticsOpen(true)}
+              >
+                {t('runtimeDiagnosticsButton')}
+              </button>
+              <button
+                type="button"
+                className="rounded-lg px-3 py-1 text-[12px] font-medium text-amber-900/80 transition hover:bg-amber-50/70 dark:text-amber-100 dark:hover:bg-amber-900/30"
+                onClick={() => openSettings('agents')}
+              >
+                {t('openSettings')}
+              </button>
+            </>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  )
+
+  const writeRuntimeBannerMessage = runtimeConnection !== 'ready'
+    ? (error?.trim() || t('writeRuntimeUnavailable'))
+    : null
+
   const beginLeftResize = (event: ReactPointerEvent<HTMLDivElement>): void => {
     if (leftSidebarCollapsed || event.button !== 0) return
     event.preventDefault()
@@ -1031,54 +1072,22 @@ export function Workbench(): ReactElement {
             </Suspense>
           </>
         ) : route === 'write' ? (
-          <div className="flex min-h-0 flex-1">
-            <WriteWorkspaceView
-              leftSidebarCollapsed={leftSidebarCollapsed}
-              onToggleLeftSidebar={toggleLeftSidebar}
-              input={input}
-              setInput={setInput}
-              onSubmitPrompt={sendWritePrompt}
-            />
-            {renderRightPanel()}
-          </div>
+          <>
+            {writeRuntimeBannerMessage ? renderRuntimeBanner(writeRuntimeBannerMessage) : null}
+            <div className="flex min-h-0 flex-1">
+              <WriteWorkspaceView
+                leftSidebarCollapsed={leftSidebarCollapsed}
+                onToggleLeftSidebar={toggleLeftSidebar}
+                input={input}
+                setInput={setInput}
+                onSubmitPrompt={sendWritePrompt}
+              />
+              {renderRightPanel()}
+            </div>
+          </>
         ) : (
           <>
-        {error && !(runtimeConnection !== 'ready' && !activeThreadId) && (
-          <div className="ds-no-drag shrink-0 border-b border-amber-200/70 bg-[rgba(255,248,235,0.82)] backdrop-blur-lg dark:border-amber-800/50 dark:bg-amber-950/35">
-            <div className={`${stageInsetClass} flex w-full min-w-0 items-start justify-between gap-3 py-3`}>
-              <p className="min-w-0 flex-1 text-[14px] leading-6 text-amber-950 dark:text-amber-100">
-                {error}
-              </p>
-              <div className="flex shrink-0 items-center gap-2">
-                {runtimeConnection !== 'ready' ? (
-                  <>
-                    <button
-                      type="button"
-                      className="rounded-lg border border-amber-300/70 bg-white px-3 py-1 text-[12px] font-medium text-amber-950 transition hover:bg-amber-100/80 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-100 dark:hover:bg-amber-900/40"
-                      onClick={() => void probeRuntime('user')}
-                    >
-                      {t('retryConnection')}
-                    </button>
-                    <button
-                      type="button"
-                      className="rounded-lg border border-amber-300/70 bg-white px-3 py-1 text-[12px] font-medium text-amber-950 transition hover:bg-amber-100/80 dark:border-amber-700/60 dark:bg-amber-900/20 dark:text-amber-100 dark:hover:bg-amber-900/40"
-                      onClick={() => setRuntimeDiagnosticsOpen(true)}
-                    >
-                      {t('runtimeDiagnosticsButton')}
-                    </button>
-                    <button
-                      type="button"
-                      className="rounded-lg px-3 py-1 text-[12px] font-medium text-amber-900/80 transition hover:bg-amber-50/70 dark:text-amber-100 dark:hover:bg-amber-900/30"
-                      onClick={() => openSettings('agents')}
-                    >
-                      {t('openSettings')}
-                    </button>
-                  </>
-                ) : null}
-              </div>
-            </div>
-          </div>
-        )}
+        {error && !(runtimeConnection !== 'ready' && !activeThreadId) ? renderRuntimeBanner(error) : null}
 
         <div className="flex min-h-0 flex-1">
           <div className={`flex min-h-0 min-w-0 flex-1 ${stageInsetClass}`}>

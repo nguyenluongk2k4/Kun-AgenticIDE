@@ -13,7 +13,9 @@ import {
   type WriteInlineCompletionSettingsV1,
   type WriteSettingsV1
 } from '@shared/app-settings'
+import i18n from '../i18n'
 import type { WorkspaceEntry } from '@shared/workspace-file'
+import { isWriteTextFilePath, isWriteWorkspaceEntry } from '@shared/write-text-file'
 import type { WriteEditorSelectionState } from '../components/write/WriteMarkdownEditor'
 import type { WriteQuotedSelection } from './quoted-selection'
 import { quotedSelectionFromEditor } from './quoted-selection'
@@ -36,6 +38,8 @@ export type WriteWorkspaceState = {
   treeError: string | null
   activeFilePath: string | null
   fileContent: string
+  fileSize: number
+  fileTruncated: boolean
   fileError: string | null
   fileLoading: boolean
   saveStatus: WriteSaveStatus
@@ -56,13 +60,22 @@ export type WriteWorkspaceState = {
   setFileContent: (content: string) => void
   syncActiveFileFromDisk: (
     workspaceRoot: string,
-    options?: { path?: string; content?: string; message?: string; animate?: boolean; force?: boolean }
+    options?: {
+      path?: string
+      content?: string
+      size?: number
+      truncated?: boolean
+      message?: string
+      animate?: boolean
+      force?: boolean
+    }
   ) => Promise<boolean>
   flushSave: (workspaceRoot: string) => Promise<boolean>
   createFile: (workspaceRoot: string, path: string, content?: string) => Promise<string | null>
   createDirectory: (workspaceRoot: string, path: string) => Promise<string | null>
   renameEntry: (workspaceRoot: string, path: string, newName: string) => Promise<string | null>
   deleteEntry: (workspaceRoot: string, path: string) => Promise<boolean>
+  setFileError: (message: string | null) => void
   setPreviewMode: (mode: WritePreviewMode) => void
   setAssistantOpen: (open: boolean) => void
   setAssistantModel: (model: string) => void
@@ -77,6 +90,7 @@ const WRITE_PREVIEW_MODE_KEY = 'deepseekgui.write.preview-mode'
 const WRITE_ASSISTANT_OPEN_KEY = 'deepseekgui.write.assistant-open'
 const WRITE_ASSISTANT_MODEL_KEY = 'deepseekgui.write.assistant-model'
 const DEFAULT_WRITE_ASSISTANT_MODEL = 'auto'
+const MAX_ANIMATED_EXTERNAL_SYNC_CHARS = 120_000
 
 let lastSavedContent = ''
 let externalSyncTimer: number | null = null
@@ -249,6 +263,10 @@ function emptySelection(): WriteEditorSelectionState {
   return { text: '', ranges: [], charCount: 0 }
 }
 
+function filterWriteEntries(entries: WorkspaceEntry[]): WorkspaceEntry[] {
+  return entries.filter(isWriteWorkspaceEntry)
+}
+
 function initialState(): Pick<
   WriteWorkspaceState,
   | 'workspaceRoot'
@@ -259,6 +277,8 @@ function initialState(): Pick<
   | 'treeError'
   | 'activeFilePath'
   | 'fileContent'
+  | 'fileSize'
+  | 'fileTruncated'
   | 'fileError'
   | 'fileLoading'
   | 'saveStatus'
@@ -274,6 +294,8 @@ function initialState(): Pick<
     treeError: null,
     activeFilePath: null,
     fileContent: '',
+    fileSize: 0,
+    fileTruncated: false,
     fileError: null,
     fileLoading: false,
     saveStatus: 'saved',
@@ -433,8 +455,10 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
     if (!root) return
     set((state) => ({ rootDirectory: root, expandedDirs: new Set([...state.expandedDirs, root]) }))
     const remembered = readRememberedActiveFile(normalized)
-    if (remembered.trim()) {
+    if (remembered.trim() && isWriteTextFilePath(remembered)) {
       await get().openFile(normalized, remembered)
+    } else if (remembered.trim()) {
+      rememberActiveFile(normalized, null)
     }
   },
 
@@ -454,10 +478,11 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
       set({ treeError: result.message })
       return null
     }
+    const visibleEntries = filterWriteEntries(result.entries)
     set((state) => {
-      const entriesByDir = { ...state.entriesByDir, [result.root]: result.entries }
+      const entriesByDir = { ...state.entriesByDir, [result.root]: visibleEntries }
       if (requestedRoot && requestedRoot !== result.root) {
-        entriesByDir[requestedRoot] = result.entries
+        entriesByDir[requestedRoot] = visibleEntries
       }
       const expandedDirs = new Set(state.expandedDirs)
       if (!path) expandedDirs.add(result.root)
@@ -503,6 +528,13 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
     cancelExternalSyncAnimation()
     const saved = await get().flushSave(workspaceRoot)
     if (!saved) return
+    if (!isWriteTextFilePath(path)) {
+      set({
+        fileLoading: false,
+        fileError: i18n.t('common:writeUnsupportedFileType')
+      })
+      return
+    }
     set({ fileLoading: true, fileError: null })
     try {
       const result = await window.dsGui.readWorkspaceFile({ path, workspaceRoot })
@@ -515,6 +547,8 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
       set({
         activeFilePath: result.path,
         fileContent: result.content,
+        fileSize: result.size,
+        fileTruncated: result.truncated,
         fileLoading: false,
         fileError: null,
         saveStatus: 'saved',
@@ -551,6 +585,8 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
 
     let content = options.content
     let resolvedPath = options.path ?? snapshot.activeFilePath
+    let size = options.size
+    let truncated = options.truncated
     if (typeof content !== 'string') {
       const result = await window.dsGui.readWorkspaceFile({
         path: snapshot.activeFilePath,
@@ -564,25 +600,50 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
       }
       content = result.content
       resolvedPath = result.path
+      size = result.size
+      truncated = result.truncated
     }
+
+    const nextSize = typeof size === 'number' && Number.isFinite(size)
+      ? Math.max(0, Math.floor(size))
+      : content.length
+    const nextTruncated = truncated === true
 
     const latest = get()
     if (!latest.activeFilePath || !pathsEqual(latest.activeFilePath, resolvedPath)) return false
     if (!force && (latest.saveStatus === 'dirty' || latest.saveStatus === 'saving')) return false
-    if (latest.fileContent === content && lastSavedContent === content) {
-      set({ saveStatus: 'saved', fileError: null, fileLoading: false })
+    if (
+      latest.fileContent === content &&
+      lastSavedContent === content &&
+      latest.fileSize === nextSize &&
+      latest.fileTruncated === nextTruncated
+    ) {
+      set({
+        saveStatus: 'saved',
+        fileError: null,
+        fileLoading: false,
+        fileSize: nextSize,
+        fileTruncated: nextTruncated
+      })
       return true
     }
 
     cancelExternalSyncAnimation()
     lastSavedContent = content
 
-    if (options.animate !== false && content.length > latest.fileContent.length) {
+    if (
+      options.animate !== false &&
+      !nextTruncated &&
+      content.length <= MAX_ANIMATED_EXTERNAL_SYNC_CHARS &&
+      content.length > latest.fileContent.length
+    ) {
       const token = externalSyncAnimationToken
       const prefix = commonPrefixLength(latest.fileContent, content)
       let cursor = prefix
       set({
         fileContent: content.slice(0, prefix),
+        fileSize: nextSize,
+        fileTruncated: nextTruncated,
         saveStatus: 'saved',
         fileError: null,
         fileLoading: false
@@ -594,6 +655,8 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
         cursor = Math.min(content.length, cursor + chunk)
         set({
           fileContent: content.slice(0, cursor),
+          fileSize: nextSize,
+          fileTruncated: nextTruncated,
           saveStatus: 'saved',
           fileError: null,
           fileLoading: false
@@ -610,6 +673,8 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
 
     set({
       fileContent: content,
+      fileSize: nextSize,
+      fileTruncated: nextTruncated,
       saveStatus: 'saved',
       fileError: null,
       fileLoading: false
@@ -620,6 +685,7 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
   flushSave: async (workspaceRoot) => {
     const state = get()
     if (!state.activeFilePath) return true
+    if (state.fileTruncated) return false
     if (externalSyncTimer !== null) {
       cancelExternalSyncAnimation()
       set({ fileContent: lastSavedContent, saveStatus: 'saved', fileError: null })
@@ -688,11 +754,12 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
     }
     const previousPrefix = `${normalizePath(result.previousPath)}/`
     set((state) => {
-      const activeFilePath = state.activeFilePath === result.previousPath
+      const nextActiveFilePath = state.activeFilePath === result.previousPath
         ? result.path
         : state.activeFilePath?.startsWith(previousPrefix)
           ? `${result.path}/${state.activeFilePath.slice(previousPrefix.length)}`
           : state.activeFilePath
+      const keepActiveFile = nextActiveFilePath ? isWriteTextFilePath(nextActiveFilePath) : false
       const expandedDirs = new Set<string>()
       for (const dirPath of state.expandedDirs) {
         if (dirPath === result.previousPath) {
@@ -704,13 +771,23 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
         }
       }
       return {
-        activeFilePath: activeFilePath ?? null,
+        activeFilePath: keepActiveFile ? nextActiveFilePath ?? null : null,
+        fileContent: keepActiveFile ? state.fileContent : '',
+        fileSize: keepActiveFile ? state.fileSize : 0,
+        fileTruncated: keepActiveFile ? state.fileTruncated : false,
+        saveStatus: keepActiveFile ? state.saveStatus : 'saved',
+        selection: keepActiveFile ? state.selection : emptySelection(),
+        quotedSelections: keepActiveFile ? state.quotedSelections : [],
         expandedDirs,
         entriesByDir: {},
         fileError: null
       }
     })
-    if (get().activeFilePath) rememberActiveFile(workspaceRoot, get().activeFilePath)
+    if (get().activeFilePath) {
+      rememberActiveFile(workspaceRoot, get().activeFilePath)
+    } else {
+      rememberActiveFile(workspaceRoot, null)
+    }
     await get().refreshWorkspace(workspaceRoot)
     return result.path
   },
@@ -731,6 +808,8 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
       set({
         activeFilePath: null,
         fileContent: '',
+        fileSize: 0,
+        fileTruncated: false,
         fileError: null,
         saveStatus: 'saved',
         selection: emptySelection(),
@@ -749,6 +828,10 @@ export const useWriteWorkspaceStore = create<WriteWorkspaceState>((set, get) => 
     })
     await get().refreshWorkspace(workspaceRoot)
     return true
+  },
+
+  setFileError: (message) => {
+    set({ fileError: message })
   },
 
   setPreviewMode: (mode) => {

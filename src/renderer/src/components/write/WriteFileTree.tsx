@@ -2,6 +2,7 @@ import type { PointerEvent as ReactPointerEvent, ReactElement, ReactNode } from 
 import { ChevronDown, ChevronRight, FileText, FilePlus2, Folder, FolderPlus, Pencil, RefreshCw, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { WorkspaceEntry } from '@shared/workspace-file'
+import { isWriteWorkspaceEntry } from '@shared/write-text-file'
 
 type Props = {
   rootDirectory: string
@@ -48,8 +49,7 @@ function isAssistantInternalDirectory(entry: WorkspaceEntry): boolean {
 }
 
 function isWriteDocument(entry: WorkspaceEntry): boolean {
-  if (isAssistantInternalDirectory(entry)) return false
-  return entry.type === 'directory' || ['.md', '.markdown', '.mdx'].includes(entry.ext.toLowerCase())
+  return !isAssistantInternalDirectory(entry) && isWriteWorkspaceEntry(entry)
 }
 
 function stopButtonPointer(event: ReactPointerEvent<HTMLButtonElement>): void {

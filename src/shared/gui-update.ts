@@ -55,6 +55,7 @@ export type GuiUpdateState =
   | { status: 'checking'; info?: GuiUpdateInfo }
   | { status: 'available'; info: Extract<GuiUpdateInfo, { ok: true }> }
   | { status: 'not_available'; info: Extract<GuiUpdateInfo, { ok: true }> }
+  | { status: 'installing'; info?: Extract<GuiUpdateInfo, { ok: true }> }
   | {
       status: 'downloading'
       info?: Extract<GuiUpdateInfo, { ok: true }>

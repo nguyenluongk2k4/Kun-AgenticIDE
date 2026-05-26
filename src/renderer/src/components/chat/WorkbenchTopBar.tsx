@@ -1,14 +1,20 @@
 import type { ReactElement } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { EditorInfo } from '@shared/editor'
+import type { GuiUpdateState } from '@shared/gui-update'
 import {
+  ArrowUpCircle,
   Check,
   ChevronDown,
   Code2,
+  Download,
+  ExternalLink,
   Gauge,
   FileEdit,
   FolderOpen,
   Globe2,
+  Loader2,
+  RefreshCw,
   Terminal
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -31,11 +37,13 @@ export function WorkbenchTopBar({
   terminalPanelEnabled,
   onToggleTerminalPanel
 }: Props): ReactElement {
-  const { t } = useTranslation('common')
+  const { t } = useTranslation(['common', 'settings'])
   const [editors, setEditors] = useState<EditorInfo[]>([])
   const [selectedEditorId, setSelectedEditorId] = useState(() => readPreferredEditorId() ?? '')
   const [editorMenuOpen, setEditorMenuOpen] = useState(false)
   const [failedIconIds, setFailedIconIds] = useState<Set<string>>(() => new Set())
+  const [guiUpdateState, setGuiUpdateState] = useState<GuiUpdateState>({ status: 'idle' })
+  const [applyingGuiUpdate, setApplyingGuiUpdate] = useState(false)
   const editorMenuRef = useRef<HTMLDivElement>(null)
   const items = [
     { mode: 'changes' as const, label: t('rightPanelChanges'), icon: FileEdit },
@@ -80,6 +88,63 @@ export function WorkbenchTopBar({
     return () => window.removeEventListener('pointerdown', onPointerDown)
   }, [editorMenuOpen])
 
+  useEffect(() => {
+    if (typeof window.dsGui?.onGuiUpdateState !== 'function') return
+    const applyState = (state: GuiUpdateState): void => {
+      setGuiUpdateState(state)
+    }
+    const unsubscribe = window.dsGui.onGuiUpdateState(applyState)
+    if (typeof window.dsGui?.getGuiUpdateState === 'function') {
+      void window.dsGui.getGuiUpdateState().then(applyState)
+    }
+    return unsubscribe
+  }, [])
+
+  const guiUpdateAction = useMemo(() => {
+    if (guiUpdateState.status === 'available' || guiUpdateState.status === 'downloaded') {
+      return guiUpdateState.info.hasUpdate ? guiUpdateState.info : null
+    }
+    if (guiUpdateState.status === 'downloading' || guiUpdateState.status === 'installing') {
+      return guiUpdateState.info?.hasUpdate ? guiUpdateState.info : null
+    }
+    if (guiUpdateState.status === 'error' && guiUpdateState.info?.ok && guiUpdateState.info.hasUpdate) {
+      return guiUpdateState.info
+    }
+    return null
+  }, [guiUpdateState])
+  const guiUpdateBusy =
+    applyingGuiUpdate || guiUpdateState.status === 'downloading' || guiUpdateState.status === 'installing'
+  const guiUpdateLabel = useMemo(() => {
+    if (!guiUpdateAction) return ''
+    if (guiUpdateState.status === 'downloading') {
+      return t('guiUpdateTopbarDownloading', {
+        percent: Math.max(0, Math.round(guiUpdateState.progress.percent))
+      })
+    }
+    if (guiUpdateState.status === 'installing') {
+      return t('guiUpdateTopbarInstalling')
+    }
+    if (guiUpdateAction.downloaded || guiUpdateState.status === 'downloaded') {
+      return t('settings:guiUpdateInstall')
+    }
+    if (guiUpdateAction.manualOnly) {
+      return t('guiUpdateTopbarManual', { version: guiUpdateAction.latestVersion })
+    }
+    return t('guiUpdateTopbarAvailable', { version: guiUpdateAction.latestVersion })
+  }, [guiUpdateAction, guiUpdateState, t])
+  const guiUpdateTitle = useMemo(() => {
+    if (!guiUpdateAction) return ''
+    return guiUpdateAction.manualOnly
+      ? t('settings:guiUpdateAvailableManual', {
+          current: guiUpdateAction.currentVersion,
+          latest: guiUpdateAction.latestVersion
+        })
+      : t('settings:guiUpdateAvailable', {
+          current: guiUpdateAction.currentVersion,
+          latest: guiUpdateAction.latestVersion
+        })
+  }, [guiUpdateAction, t])
+
   const chooseEditor = (editor: EditorInfo): void => {
     setSelectedEditorId(editor.id)
     writePreferredEditorId(editor.id)
@@ -114,8 +179,78 @@ export function WorkbenchTopBar({
     return <Icon className={`${className} shrink-0`} strokeWidth={1.8} />
   }
 
+  const runGuiUpdateAction = async (): Promise<void> => {
+    if (!guiUpdateAction || guiUpdateBusy) return
+    if (guiUpdateAction.manualOnly) {
+      if (typeof window.dsGui?.openExternal === 'function') {
+        await window.dsGui.openExternal(guiUpdateAction.releaseUrl)
+      }
+      return
+    }
+    if (
+      typeof window.dsGui?.downloadGuiUpdate !== 'function' ||
+      typeof window.dsGui?.installGuiUpdate !== 'function'
+    ) {
+      return
+    }
+
+    setApplyingGuiUpdate(true)
+    try {
+      if (!guiUpdateAction.downloaded && guiUpdateState.status !== 'downloaded') {
+        const downloadResult = await window.dsGui.downloadGuiUpdate(guiUpdateAction.channel)
+        if (!downloadResult.ok) return
+      }
+      const installResult = await window.dsGui.installGuiUpdate()
+      if (!installResult.ok && typeof window.dsGui?.logError === 'function') {
+        await window.dsGui.logError('gui-update', 'Failed to install GUI update from workbench top bar', {
+          version: guiUpdateAction.latestVersion,
+          message: installResult.message
+        })
+      }
+    } catch (error) {
+      if (typeof window.dsGui?.logError === 'function') {
+        await window.dsGui.logError('gui-update', 'Failed to apply GUI update from workbench top bar', {
+          version: guiUpdateAction.latestVersion,
+          message: error instanceof Error ? error.message : String(error)
+        })
+      }
+    } finally {
+      setApplyingGuiUpdate(false)
+    }
+  }
+
+  const renderGuiUpdateIcon = (): ReactElement => {
+    if (guiUpdateState.status === 'downloading' || guiUpdateState.status === 'installing' || applyingGuiUpdate) {
+      return <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />
+    }
+    if (guiUpdateAction?.downloaded || guiUpdateState.status === 'downloaded') {
+      return <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.85} />
+    }
+    if (guiUpdateAction?.manualOnly) {
+      return <ExternalLink className="h-3.5 w-3.5" strokeWidth={1.85} />
+    }
+    if (guiUpdateAction) {
+      return <ArrowUpCircle className="h-3.5 w-3.5" strokeWidth={1.85} />
+    }
+    return <Download className="h-3.5 w-3.5" strokeWidth={1.85} />
+  }
+
   return (
     <div className="chat-workbench-topbar ds-no-drag flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-1">
+      {guiUpdateAction ? (
+        <button
+          type="button"
+          onClick={() => void runGuiUpdateAction()}
+          disabled={guiUpdateBusy}
+          className="inline-flex items-center gap-1.5 rounded-full border border-amber-300/75 bg-amber-50/92 px-3 py-1.5 text-[12.5px] font-semibold text-amber-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-700/70 dark:bg-amber-950/35 dark:text-amber-100 dark:hover:bg-amber-900/45"
+          aria-label={guiUpdateTitle}
+          title={guiUpdateTitle}
+        >
+          {renderGuiUpdateIcon()}
+          <span className="max-w-[11rem] truncate">{guiUpdateLabel}</span>
+        </button>
+      ) : null}
+
       <div ref={editorMenuRef} className="relative">
         <button
           type="button"

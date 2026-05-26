@@ -1,13 +1,16 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactElement } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactElement } from 'react'
 import {
   BookOpen,
+  ChevronDown,
   Columns2,
   CornerDownLeft,
+  Download,
   Eye,
   FileCode2,
   FilePlus2,
   FilePenLine,
   FolderOpen,
+  Loader2,
   ListTodo,
   MessageSquareQuote,
   PanelLeftClose,
@@ -17,6 +20,7 @@ import {
   Sparkles
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import type { WriteExportFormat } from '@shared/write-export'
 import { useChatStore } from '../../store/chat-store'
 import {
   useWriteWorkspaceStore,
@@ -26,6 +30,7 @@ import {
   writeJoinPath,
   writeRelativeToWorkspace
 } from '../../write/write-workspace-store'
+import { getWriteRenderSafety } from '../../write/write-render-safety'
 import { WriteMarkdownEditor } from './WriteMarkdownEditor'
 import { WriteMarkdownPreview } from './WriteMarkdownPreview'
 
@@ -41,6 +46,13 @@ const WRITE_AUTOSAVE_MS = 900
 const INLINE_AGENT_MIN_WIDTH = 280
 const INLINE_AGENT_MAX_WIDTH = 440
 const INLINE_AGENT_FALLBACK_HEIGHT = 56
+const WRITE_EXPORT_NOTICE_MS = 3_600
+const WRITE_EXPORT_FORMATS: WriteExportFormat[] = ['html', 'pdf', 'doc', 'docx']
+
+type WriteNotice = {
+  tone: 'success' | 'error'
+  message: string
+}
 
 function isMarkdownFile(filePath: string): boolean {
   return /\.(md|markdown|mdx)$/i.test(filePath)
@@ -99,6 +111,21 @@ function toolbarIconButtonClass(active = false): string {
   }`
 }
 
+function toolbarMenuButtonClass(active = false): string {
+  return `inline-flex h-8 shrink-0 items-center gap-1 rounded-lg px-2.5 text-[12.5px] font-medium text-ds-faint transition ${
+    active
+      ? 'bg-accent/10 text-accent'
+      : 'hover:bg-white/70 hover:text-ds-ink dark:hover:bg-white/8'
+  }`
+}
+
+function exportFormatLabel(format: WriteExportFormat, t: (key: string) => string): string {
+  if (format === 'html') return t('writeExportHtml')
+  if (format === 'pdf') return t('writeExportPdf')
+  if (format === 'doc') return t('writeExportDoc')
+  return t('writeExportDocx')
+}
+
 export function WriteWorkspaceView({
   leftSidebarCollapsed,
   onToggleLeftSidebar,
@@ -108,6 +135,7 @@ export function WriteWorkspaceView({
 }: Props): ReactElement {
   const { t } = useTranslation('common')
   const ensureWriteThreadForWorkspace = useChatStore((s) => s.ensureWriteThreadForWorkspace)
+  const runtimeConnection = useChatStore((s) => s.runtimeConnection)
   const {
     workspaceRoot,
     activeFilePath,
@@ -115,6 +143,8 @@ export function WriteWorkspaceView({
     inlineCompletion,
     inlineCompletionApiReady,
     fileContent,
+    fileSize,
+    fileTruncated,
     fileError,
     fileLoading,
     saveStatus,
@@ -128,18 +158,30 @@ export function WriteWorkspaceView({
     flushSave,
     createFile,
     refreshWorkspace,
+    setFileError,
     setPreviewMode,
     setAssistantOpen,
     setSelection,
     quoteCurrentSelection
   } = useWriteWorkspaceStore()
   const saveTimerRef = useRef<number | null>(null)
+  const exportMenuRef = useRef<HTMLDivElement | null>(null)
+  const exportNoticeTimerRef = useRef<number | null>(null)
   const inlineAgentTextareaRef = useRef<HTMLTextAreaElement | null>(null)
   const [inlineAgentValue, setInlineAgentValue] = useState('')
   const [inlineAgentOpen, setInlineAgentOpen] = useState(false)
+  const [exportMenuOpen, setExportMenuOpen] = useState(false)
+  const [exportingFormat, setExportingFormat] = useState<WriteExportFormat | null>(null)
+  const [exportNotice, setExportNotice] = useState<WriteNotice | null>(null)
   const workspaceReady = workspaceRoot.trim().length > 0
   const isMarkdown = activeFilePath ? isMarkdownFile(activeFilePath) : true
-  const saveLabel = formatSaveLabel(saveStatus, t)
+  const renderSafety = getWriteRenderSafety({
+    isMarkdown,
+    contentLength: fileContent.length,
+    fileSize,
+    truncated: fileTruncated
+  })
+  const saveLabel = renderSafety.readOnly ? t('writeReadOnly') : formatSaveLabel(saveStatus, t)
   const selectionAction = selection.charCount > 0 ? inlineAgentPosition(selection) : null
   const selectionActionActive = Boolean(selectionAction)
   const selectionActionLeft = selectionAction?.left
@@ -150,6 +192,17 @@ export function WriteWorkspaceView({
   const activeFileName = activeFilePath ? writeBasenameFromPath(activeFilePath) : t('writeStudio')
   const workspacePathLabel = rootDirectory || workspaceRoot
   const workspaceName = workspacePathLabel ? writeBasenameFromPath(workspacePathLabel) : t('writeWorkspace')
+  const exportInFlight = exportingFormat !== null
+  const fileGuardMessage = renderSafety.notice === 'truncated'
+    ? t('writeLargeFileTruncated')
+    : renderSafety.notice === 'large-file'
+      ? t('writeLargeFileSafeMode')
+      : ''
+  const fileGuardDetail = renderSafety.notice === 'large-file' ? t('writeLargeFileSafeModeSub') : ''
+
+  const showExportNotice = (notice: WriteNotice): void => {
+    setExportNotice(notice)
+  }
 
   const createDraftFile = async (): Promise<void> => {
     if (!workspaceReady) {
@@ -181,7 +234,7 @@ export function WriteWorkspaceView({
     setInput(input.trim() ? `${input.trim()}\n\n${trimmed}` : trimmed)
   }
 
-  const handleInlineAgentKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
+  const handleInlineAgentKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>): void => {
     if (event.key === 'Escape') {
       event.preventDefault()
       setInlineAgentOpen(false)
@@ -198,13 +251,62 @@ export function WriteWorkspaceView({
     const picked = await window.dsGui.pickWorkspaceDirectory(workspaceRoot || undefined)
     if (!picked.canceled && picked.path) {
       await addWriteWorkspace(picked.path)
-      void ensureWriteThreadForWorkspace(picked.path)
+      if (runtimeConnection === 'ready') void ensureWriteThreadForWorkspace(picked.path)
+    }
+  }
+
+  const exportCurrentFile = async (format: WriteExportFormat): Promise<void> => {
+    if (!activeFilePath) return
+    if (typeof window.dsGui?.exportWriteDocument !== 'function') {
+      showExportNotice({ tone: 'error', message: t('writeExportUnavailable') })
+      return
+    }
+
+    setExportMenuOpen(false)
+    setExportingFormat(format)
+    try {
+      const result = await window.dsGui.exportWriteDocument({
+        path: activeFilePath,
+        workspaceRoot,
+        format,
+        content: fileContent
+      })
+      if (!result.ok) {
+        if (!result.canceled) {
+          showExportNotice({
+            tone: 'error',
+            message: t('writeExportFailed', {
+              format: exportFormatLabel(format, t),
+              message: result.message
+            })
+          })
+        }
+        return
+      }
+      showExportNotice({
+        tone: 'success',
+        message: t('writeExportSuccess', { format: exportFormatLabel(format, t) })
+      })
+    } catch (error) {
+      showExportNotice({
+        tone: 'error',
+        message: t('writeExportFailed', {
+          format: exportFormatLabel(format, t),
+          message: error instanceof Error ? error.message : String(error)
+        })
+      })
+    } finally {
+      setExportingFormat(null)
     }
   }
 
   useEffect(() => {
     void loadWriteSettings()
   }, [loadWriteSettings])
+
+  useEffect(() => {
+    setExportMenuOpen(false)
+  }, [activeFilePath])
 
   useEffect(() => {
     if (!selectionActionActive || !inlineAgentOpen) return
@@ -217,11 +319,51 @@ export function WriteWorkspaceView({
   }, [selection.charCount, selection.text])
 
   useEffect(() => {
+    if (!exportMenuOpen) return
+
+    const handlePointerDown = (event: PointerEvent): void => {
+      const target = event.target
+      if (exportMenuRef.current && target instanceof Node && !exportMenuRef.current.contains(target)) {
+        setExportMenuOpen(false)
+      }
+    }
+
+    const handleKeyDown = (event: globalThis.KeyboardEvent): void => {
+      if (event.key === 'Escape') setExportMenuOpen(false)
+    }
+
+    window.addEventListener('pointerdown', handlePointerDown)
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown)
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [exportMenuOpen])
+
+  useEffect(() => {
+    if (exportNoticeTimerRef.current) {
+      window.clearTimeout(exportNoticeTimerRef.current)
+      exportNoticeTimerRef.current = null
+    }
+    if (!exportNotice) return
+    exportNoticeTimerRef.current = window.setTimeout(() => {
+      exportNoticeTimerRef.current = null
+      setExportNotice(null)
+    }, WRITE_EXPORT_NOTICE_MS)
+    return () => {
+      if (exportNoticeTimerRef.current) {
+        window.clearTimeout(exportNoticeTimerRef.current)
+        exportNoticeTimerRef.current = null
+      }
+    }
+  }, [exportNotice])
+
+  useEffect(() => {
     if (saveTimerRef.current) {
       window.clearTimeout(saveTimerRef.current)
       saveTimerRef.current = null
     }
-    if (saveStatus !== 'dirty' || !workspaceReady) return
+    if (saveStatus !== 'dirty' || !workspaceReady || renderSafety.readOnly) return
     saveTimerRef.current = window.setTimeout(() => {
       saveTimerRef.current = null
       void flushSave(workspaceRoot)
@@ -232,10 +374,14 @@ export function WriteWorkspaceView({
         saveTimerRef.current = null
       }
     }
-  }, [flushSave, saveStatus, workspaceReady, workspaceRoot, fileContent])
+  }, [flushSave, saveStatus, workspaceReady, workspaceRoot, fileContent, renderSafety.readOnly])
 
   useEffect(() => () => {
     if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current)
+    if (exportNoticeTimerRef.current) {
+      window.clearTimeout(exportNoticeTimerRef.current)
+      exportNoticeTimerRef.current = null
+    }
     void useWriteWorkspaceStore.getState().flushSave(workspaceRoot)
   }, [workspaceRoot])
 
@@ -257,6 +403,8 @@ export function WriteWorkspaceView({
         void syncActiveFileFromDisk(workspaceRoot, {
           path: payload.path,
           content: payload.content,
+          size: payload.size,
+          truncated: payload.truncated,
           animate: true
         })
         return
@@ -319,7 +467,9 @@ export function WriteWorkspaceView({
   const previewWidth = previewMode === 'split'
     ? 'min-w-0 flex-1 basis-1/2'
     : 'min-w-0 flex-1'
-  const editorAppearance = previewMode === 'source' ? 'source' : 'live'
+  const liveModeActive = previewMode === 'live' && renderSafety.livePreviewEnabled
+  const sourceModeActive = previewMode === 'source' || (previewMode === 'live' && !renderSafety.livePreviewEnabled)
+  const editorAppearance = sourceModeActive ? 'source' : 'live'
 
   const renderModeButton = (
     nextMode: WritePreviewMode,
@@ -329,7 +479,13 @@ export function WriteWorkspaceView({
     <button
       type="button"
       onClick={() => setPreviewMode(nextMode)}
-      className={modeButtonClass(previewMode === nextMode)}
+      className={modeButtonClass(
+        nextMode === 'source'
+          ? sourceModeActive
+          : nextMode === 'live'
+            ? liveModeActive
+            : previewMode === nextMode
+      )}
       title={label}
       aria-label={label}
     >
@@ -372,7 +528,7 @@ export function WriteWorkspaceView({
             <button
               type="button"
               onClick={() => setPreviewMode('live')}
-              className={`${modeButtonClass(previewMode === 'live')} gap-1.5`}
+              className={`${modeButtonClass(liveModeActive)} gap-1.5`}
               title={t('writeModeLive')}
               aria-label={t('writeModeLive')}
             >
@@ -410,21 +566,64 @@ export function WriteWorkspaceView({
             >
               <Sparkles className="h-4 w-4" strokeWidth={1.85} />
             </button>
+            <div ref={exportMenuRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setExportMenuOpen((open) => !open)}
+                disabled={!activeFilePath || exportInFlight}
+                className={`${toolbarMenuButtonClass(exportMenuOpen)} disabled:cursor-not-allowed disabled:opacity-40`}
+                title={exportInFlight ? t('writeExporting') : t('writeExport')}
+                aria-label={exportInFlight ? t('writeExporting') : t('writeExport')}
+                aria-haspopup="menu"
+                aria-expanded={exportMenuOpen}
+              >
+                {exportInFlight ? (
+                  <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.85} />
+                ) : (
+                  <Download className="h-4 w-4" strokeWidth={1.85} />
+                )}
+                <span className="hidden lg:inline">{t('writeExport')}</span>
+                <ChevronDown className="h-3.5 w-3.5 opacity-70" strokeWidth={1.9} />
+              </button>
+              {exportMenuOpen ? (
+                <div
+                  role="menu"
+                  className="absolute right-0 top-full z-30 mt-2 w-52 overflow-hidden rounded-2xl border border-ds-border bg-ds-card/95 p-1.5 shadow-[0_22px_48px_rgba(15,23,42,0.16)] backdrop-blur-xl"
+                >
+                  {WRITE_EXPORT_FORMATS.map((format) => (
+                    <button
+                      key={format}
+                      type="button"
+                      role="menuitem"
+                      onClick={() => void exportCurrentFile(format)}
+                      className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-[13px] text-ds-ink transition hover:bg-ds-hover/80"
+                    >
+                      <span>{exportFormatLabel(format, t)}</span>
+                      <span className="font-mono text-[11px] uppercase tracking-[0.08em] text-ds-faint">
+                        {format}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
             <button
               type="button"
               onClick={() => {
                 if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current)
                 void flushSave(workspaceRoot)
               }}
-              disabled={!activeFilePath}
+              disabled={!activeFilePath || renderSafety.readOnly}
               className={`${toolbarIconButtonClass()} disabled:cursor-not-allowed disabled:opacity-40`}
-              title={t('writeSaveFile')}
-              aria-label={t('writeSaveFile')}
+              title={renderSafety.readOnly ? t('writeReadOnlySaveDisabled') : t('writeSaveFile')}
+              aria-label={renderSafety.readOnly ? t('writeReadOnlySaveDisabled') : t('writeSaveFile')}
             >
               <Save className="h-4 w-4" strokeWidth={1.85} />
             </button>
             <span className={`ml-1 inline-flex min-w-[64px] justify-center rounded-lg px-2.5 py-1 text-[11.5px] font-semibold ${
-              saveStatus === 'error'
+              renderSafety.readOnly
+                ? 'bg-slate-500/12 text-slate-700 dark:text-slate-300'
+                : saveStatus === 'error'
                 ? 'bg-red-500/12 text-red-600 dark:text-red-300'
                 : saveStatus === 'dirty'
                   ? 'bg-amber-500/12 text-amber-700 dark:text-amber-300'
@@ -441,25 +640,25 @@ export function WriteWorkspaceView({
       <div className="flex min-h-0 min-w-0 flex-1 gap-3 overflow-hidden pb-3 pt-3">
         <div className="min-w-0 flex-1 overflow-hidden rounded-[28px] border border-ds-border bg-ds-card/88 shadow-[0_20px_56px_rgba(15,23,42,0.06)] backdrop-blur-xl">
           {!activeFilePath ? (
-            <div className="relative h-full min-h-[420px] overflow-auto rounded-[28px] bg-[linear-gradient(180deg,rgba(255,255,255,0.82),rgba(247,250,255,0.62))] px-5 py-5 dark:bg-[linear-gradient(180deg,rgba(255,255,255,0.07),rgba(255,255,255,0.025))] sm:px-8 sm:py-8">
-              <div className="mx-auto grid min-h-full w-full max-w-6xl items-center gap-6 lg:grid-cols-[minmax(0,1fr)_360px] xl:grid-cols-[minmax(0,1fr)_400px]">
-                <section className="min-w-0 py-4">
+            <div className="write-start-shell relative h-full min-h-[420px] overflow-auto rounded-[28px] bg-[linear-gradient(180deg,rgba(255,255,255,0.82),rgba(247,250,255,0.62))] px-5 py-5 dark:bg-[linear-gradient(180deg,rgba(255,255,255,0.07),rgba(255,255,255,0.025))] sm:px-8 sm:py-8">
+              <div className="write-start-grid mx-auto grid min-h-full w-full max-w-6xl gap-6">
+                <section className="write-start-hero min-w-0 py-4">
                   <div className="inline-flex items-center gap-2 rounded-full border border-accent/15 bg-accent/10 px-3 py-1.5 text-[12px] font-semibold text-accent">
                     <Sparkles className="h-3.5 w-3.5" strokeWidth={1.9} />
                     <span>{t('writeStudio')}</span>
                   </div>
-                  <h2 className="mt-5 max-w-2xl text-[34px] font-semibold leading-[1.08] tracking-[0] text-ds-ink sm:text-[44px]">
+                  <h2 className="write-start-heading mt-5 max-w-[12ch] text-[clamp(2.25rem,5vw,3.25rem)] font-semibold leading-[1.08] tracking-[0] text-ds-ink">
                     {t('writeStartTitle')}
                   </h2>
-                  <p className="mt-4 max-w-2xl text-[15px] leading-7 text-ds-muted">
+                  <p className="write-start-copy mt-4 max-w-[56ch] text-[15px] leading-7 text-ds-muted">
                     {t('writeStartSub')}
                   </p>
 
-                  <div className="mt-7 flex flex-wrap gap-3">
+                  <div className="write-start-primary-actions mt-7 grid gap-3">
                     <button
                       type="button"
                       onClick={() => void createDraftFile()}
-                      className="inline-flex h-12 items-center gap-2 rounded-xl bg-accent px-5 text-[14px] font-semibold text-white shadow-[0_14px_30px_rgba(0,136,255,0.22)] transition hover:brightness-110"
+                      className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-accent px-5 text-[14px] font-semibold text-white shadow-[0_14px_30px_rgba(0,136,255,0.22)] transition hover:brightness-110"
                     >
                       <FilePlus2 className="h-4 w-4" strokeWidth={1.9} />
                       {t('writeStartNewDraft')}
@@ -467,14 +666,14 @@ export function WriteWorkspaceView({
                     <button
                       type="button"
                       onClick={() => setAssistantPrompt(t('writeStartAskAiPrompt'))}
-                      className="inline-flex h-12 items-center gap-2 rounded-xl border border-ds-border bg-white/70 px-5 text-[14px] font-semibold text-ds-ink shadow-sm transition hover:bg-white dark:bg-white/[0.055] dark:hover:bg-white/[0.08]"
+                      className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-ds-border bg-white/70 px-5 text-[14px] font-semibold text-ds-ink shadow-sm transition hover:bg-white dark:bg-white/[0.055] dark:hover:bg-white/[0.08]"
                     >
                       <ListTodo className="h-4 w-4 text-emerald-600 dark:text-emerald-300" strokeWidth={1.9} />
                       {t('writeStartAskAi')}
                     </button>
                   </div>
 
-                  <div className="mt-7 grid max-w-2xl grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="write-start-shortcuts mt-7 grid gap-3">
                     <button
                       type="button"
                       onClick={() => void refreshWorkspace(workspaceRoot)}
@@ -512,7 +711,7 @@ export function WriteWorkspaceView({
                   </div>
                 </section>
 
-                <aside className="min-w-0 rounded-[24px] border border-ds-border-muted bg-white/58 p-5 shadow-[0_18px_48px_rgba(15,23,42,0.07)] dark:bg-white/[0.04]">
+                <aside className="write-start-card min-w-0 rounded-[24px] border border-ds-border-muted bg-white/58 p-5 shadow-[0_18px_48px_rgba(15,23,42,0.07)] dark:bg-white/[0.04]">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="text-[12px] font-semibold text-ds-faint">
@@ -556,7 +755,7 @@ export function WriteWorkspaceView({
                     <div className="text-[12px] font-semibold text-ds-faint">
                       {t('writeStartWorkspacePath')}
                     </div>
-                    <div className="mt-2 truncate font-mono text-[12px] text-ds-muted" title={workspacePathLabel}>
+                    <div className="mt-2 break-all font-mono text-[12px] leading-5 text-ds-muted" title={workspacePathLabel}>
                       {workspacePathLabel}
                     </div>
                   </div>
@@ -568,41 +767,59 @@ export function WriteWorkspaceView({
               {t('filePreviewLoading')}
             </div>
           ) : (
-            <div className="flex h-full min-h-0 min-w-0">
-              {editorVisible ? (
-                <div className={`${editorWidth} min-h-0 overflow-hidden`}>
-                  <WriteMarkdownEditor
-                    value={fileContent}
-                    workspaceRoot={workspaceRoot}
-                    filePath={activeFilePath}
-                    appearance={editorAppearance}
-                    completionModel={inlineCompletion.model}
-                    completionEnabled={inlineCompletion.enabled && inlineCompletionApiReady}
-                    completionDebounceMs={inlineCompletion.debounceMs}
-                    completionMinAcceptScore={inlineCompletion.minAcceptScore}
-                    completionLongEnabled={inlineCompletion.longCompletionEnabled}
-                    completionLongDebounceMs={inlineCompletion.longDebounceMs}
-                    completionLongMinAcceptScore={inlineCompletion.longMinAcceptScore}
-                    onChange={setFileContent}
-                    onSelectionChange={setSelection}
-                    onSaveShortcut={() => {
-                      if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current)
-                      void flushSave(workspaceRoot)
-                    }}
-                  />
+            <div className="flex h-full min-h-0 min-w-0 flex-col">
+              {renderSafety.notice !== 'none' ? (
+                <div className="shrink-0 border-b border-amber-200/80 bg-amber-50/90 px-5 py-3 text-[12.5px] leading-5 text-amber-900 dark:border-amber-800/60 dark:bg-amber-950/35 dark:text-amber-100 sm:px-6">
+                  <div className="font-semibold">{fileGuardMessage}</div>
+                  {fileGuardDetail ? (
+                    <div className="mt-1 text-amber-800/90 dark:text-amber-100/90">{fileGuardDetail}</div>
+                  ) : null}
                 </div>
               ) : null}
+              <div className="flex min-h-0 min-w-0 flex-1">
+                {editorVisible ? (
+                  <div className={`${editorWidth} min-h-0 overflow-hidden`}>
+                    <WriteMarkdownEditor
+                      value={fileContent}
+                      workspaceRoot={workspaceRoot}
+                      filePath={activeFilePath}
+                      appearance={editorAppearance}
+                      livePreviewEnabled={renderSafety.livePreviewEnabled}
+                      readOnly={renderSafety.readOnly}
+                      completionModel={inlineCompletion.model}
+                      completionEnabled={inlineCompletion.enabled && inlineCompletionApiReady}
+                      completionDebounceMs={inlineCompletion.debounceMs}
+                      completionMinAcceptScore={inlineCompletion.minAcceptScore}
+                      completionLongEnabled={inlineCompletion.longCompletionEnabled}
+                      completionLongDebounceMs={inlineCompletion.longDebounceMs}
+                      completionLongMinAcceptScore={inlineCompletion.longMinAcceptScore}
+                      onChange={setFileContent}
+                      onSelectionChange={setSelection}
+                      onSaveShortcut={() => {
+                        if (renderSafety.readOnly) return
+                        if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current)
+                        void flushSave(workspaceRoot)
+                      }}
+                      onImagePasteSaved={() => {
+                        setFileError(null)
+                        void refreshWorkspace(workspaceRoot)
+                      }}
+                      onImagePasteError={(message) => setFileError(message)}
+                    />
+                  </div>
+                ) : null}
 
-              {previewVisible ? (
-                <div className={`${previewWidth} min-h-0 overflow-y-auto overflow-x-hidden`}>
-                  <WriteMarkdownPreview
-                    content={fileContent}
-                    isMarkdown={isMarkdown}
-                    filePath={activeFilePath}
-                    previewErrorMessage={t('writePreviewErrorFallback')}
-                  />
-                </div>
-              ) : null}
+                {previewVisible ? (
+                  <div className={`${previewWidth} min-h-0 overflow-y-auto overflow-x-hidden`}>
+                    <WriteMarkdownPreview
+                      content={fileContent}
+                      isMarkdown={isMarkdown && renderSafety.markdownPreviewEnabled}
+                      filePath={activeFilePath}
+                      previewErrorMessage={t('writePreviewErrorFallback')}
+                    />
+                  </div>
+                ) : null}
+              </div>
             </div>
           )}
         </div>
@@ -664,6 +881,18 @@ export function WriteWorkspaceView({
       {fileError ? (
         <div className="pointer-events-none fixed bottom-5 left-1/2 z-40 -translate-x-1/2 rounded-full border border-red-200/70 bg-red-50/92 px-4 py-2 text-[13px] text-red-700 shadow-[0_14px_32px_rgba(15,23,42,0.12)] dark:border-red-900/60 dark:bg-red-950/84 dark:text-red-200">
           {fileError}
+        </div>
+      ) : null}
+      {exportNotice ? (
+        <div
+          className={`pointer-events-none fixed left-1/2 z-40 -translate-x-1/2 rounded-full border px-4 py-2 text-[13px] shadow-[0_14px_32px_rgba(15,23,42,0.12)] ${
+            exportNotice.tone === 'error'
+              ? 'border-red-200/70 bg-red-50/92 text-red-700 dark:border-red-900/60 dark:bg-red-950/84 dark:text-red-200'
+              : 'border-emerald-200/80 bg-emerald-50/92 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/84 dark:text-emerald-200'
+          }`}
+          style={{ bottom: fileError ? 68 : 20 }}
+        >
+          {exportNotice.message}
         </div>
       ) : null}
     </div>

@@ -50,6 +50,11 @@ export type WorkspaceFileWatchPayload = {
   workspaceRoot: string
 }
 
+export type WorkspaceClipboardImageSavePayload = {
+  workspaceRoot: string
+  currentFilePath: string
+}
+
 export type WorkspaceFileReadResult =
   | {
       ok: true
@@ -127,6 +132,15 @@ export type WorkspaceFileWatchResult =
       size: number
       truncated: boolean
       startedAt: string
+    }
+  | { ok: false; message: string }
+
+export type WorkspaceClipboardImageSaveResult =
+  | {
+      ok: true
+      path: string
+      markdownPath: string
+      createdAt: string
     }
   | { ok: false; message: string }
 

@@ -1166,6 +1166,10 @@ app.whenReady().then(async () => {
     logError
   })
 
+  void loadGuiUpdaterModule().catch((error) => {
+    console.warn('[deepseek-gui updater] failed to initialize on startup:', error)
+  })
+
   ipcMain.handle('deepseek:spawn-if-needed', async () => {
     const s = await store.load()
     if (!resolveConfiguredApiKey(s)) {

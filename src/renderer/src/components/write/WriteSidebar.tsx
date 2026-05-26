@@ -50,6 +50,7 @@ export function WriteSidebar({
 }: Props): ReactElement {
   const { t } = useTranslation('common')
   const ensureWriteThreadForWorkspace = useChatStore((s) => s.ensureWriteThreadForWorkspace)
+  const runtimeConnection = useChatStore((s) => s.runtimeConnection)
   const [appVersion, setAppVersion] = useState('')
   const [entryDialog, setEntryDialog] = useState<EntryDialog | null>(null)
   const [collapsedWorkspaces, setCollapsedWorkspaces] = useState<Record<string, boolean>>({})
@@ -187,13 +188,13 @@ export function WriteSidebar({
     const picked = await window.dsGui.pickWorkspaceDirectory(workspaceRoot || defaultWorkspaceRoot || undefined)
     if (!picked.canceled && picked.path) {
       await addWriteWorkspace(picked.path)
-      void ensureWriteThreadForWorkspace(picked.path)
+      if (runtimeConnection === 'ready') void ensureWriteThreadForWorkspace(picked.path)
     }
   }
 
   const selectWorkspaceAndThread = async (workspacePath: string): Promise<void> => {
     await selectWriteWorkspace(workspacePath)
-    void ensureWriteThreadForWorkspace(workspacePath)
+    if (runtimeConnection === 'ready') void ensureWriteThreadForWorkspace(workspacePath)
   }
 
   const toggleWorkspaceGroup = async (workspacePath: string): Promise<void> => {

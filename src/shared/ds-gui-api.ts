@@ -25,6 +25,8 @@ import type {
   TerminalResizePayload
 } from './terminal-session'
 import type {
+  WorkspaceClipboardImageSavePayload,
+  WorkspaceClipboardImageSaveResult,
   WorkspaceFileReadResult,
   WorkspaceDirectoryCreatePayload,
   WorkspaceDirectoryCreateResult,
@@ -48,6 +50,7 @@ import type {
   WriteInlineCompletionRequest,
   WriteInlineCompletionResult
 } from './write-inline-completion'
+import type { WriteExportPayload, WriteExportResult } from './write-export'
 
 export type RuntimeRequestResult = { ok: boolean; status: number; body: string }
 export type WorkspacePickResult = { canceled: boolean; path: string | null }
@@ -176,6 +179,9 @@ export type DsGuiApi = {
   createWorkspaceDirectory: (
     payload: WorkspaceDirectoryCreatePayload
   ) => Promise<WorkspaceDirectoryCreateResult>
+  saveWorkspaceClipboardImage: (
+    payload: WorkspaceClipboardImageSavePayload
+  ) => Promise<WorkspaceClipboardImageSaveResult>
   renameWorkspaceEntry: (
     payload: WorkspaceEntryRenamePayload
   ) => Promise<WorkspaceEntryRenameResult>
@@ -188,6 +194,7 @@ export type DsGuiApi = {
   requestWriteInlineCompletion: (
     payload: WriteInlineCompletionRequest
   ) => Promise<WriteInlineCompletionResult>
+  exportWriteDocument: (payload: WriteExportPayload) => Promise<WriteExportResult>
   startSse: (threadId: string, sinceSeq: number, streamId?: string) => Promise<{ streamId: string }>
   stopSse: (streamId: string) => Promise<boolean>
   onSseEvent: (handler: (payload: SseEventPayload) => void) => () => void

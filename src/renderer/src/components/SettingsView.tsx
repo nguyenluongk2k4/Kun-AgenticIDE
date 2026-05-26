@@ -693,6 +693,7 @@ export function SettingsView(): ReactElement {
     if (state.status === 'downloading') {
       setCheckingGuiUpdate(false)
       setDownloadingGuiUpdate(true)
+      setInstallingGuiUpdate(false)
       setGuiUpdateProgress(state.progress)
       setGuiUpdateError(null)
       return
@@ -702,6 +703,14 @@ export function SettingsView(): ReactElement {
       setDownloadingGuiUpdate(false)
       setGuiUpdateProgress(null)
       setGuiUpdateDownloaded(true)
+      setGuiUpdateError(null)
+      return
+    }
+    if (state.status === 'installing') {
+      setCheckingGuiUpdate(false)
+      setDownloadingGuiUpdate(false)
+      setInstallingGuiUpdate(true)
+      setGuiUpdateProgress(null)
       setGuiUpdateError(null)
       return
     }

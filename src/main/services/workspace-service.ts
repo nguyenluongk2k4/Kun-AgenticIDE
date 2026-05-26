@@ -1,4 +1,4 @@
-import { app, shell } from 'electron'
+import { app, clipboard, shell } from 'electron'
 import { execFile } from 'node:child_process'
 import { existsSync, type Dirent } from 'node:fs'
 import {
@@ -25,6 +25,8 @@ import type {
   EditorOpenResult
 } from '../../shared/editor'
 import type {
+  WorkspaceClipboardImageSavePayload,
+  WorkspaceClipboardImageSaveResult,
   WorkspaceDirectoryCreatePayload,
   WorkspaceDirectoryCreateResult,
   WorkspaceDirectoryListResult,
@@ -76,6 +78,7 @@ type ResolveTargetOptions = {
 const DEFAULT_EDITOR_ID = 'system'
 const MAX_FILE_PREVIEW_BYTES = 1_500_000
 const EDITOR_ICON_PX = 18
+const WORKSPACE_IMAGE_DIR = 'img'
 const SKIP_SEARCH_DIRS = new Set([
   '.git',
   '.hg',
@@ -498,6 +501,10 @@ function hasPathSeparator(value: string): boolean {
   return /[\\/]/.test(value)
 }
 
+function normalizePathSeparators(value: string): string {
+  return value.replaceAll('\\', '/')
+}
+
 function extensionFromName(name: string): string {
   const dot = name.lastIndexOf('.')
   return dot > 0 ? name.slice(dot).toLowerCase() : ''
@@ -872,6 +879,55 @@ export async function createWorkspaceDirectory(
     return {
       ok: true,
       path: targetPath,
+      createdAt: new Date().toISOString()
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : String(error)
+    }
+  }
+}
+
+function buildWorkspaceImageName(now = new Date()): string {
+  const iso = now.toISOString().replace(/[-:]/g, '').replace(/\..+$/, '').replace('T', '-')
+  return `pasted-image-${iso}-${randomUUID().slice(0, 8)}.png`
+}
+
+export async function saveWorkspaceClipboardImage(
+  payload: WorkspaceClipboardImageSavePayload
+): Promise<WorkspaceClipboardImageSaveResult> {
+  try {
+    const currentFilePath = await resolveOpenTargetPath(payload.currentFilePath, payload.workspaceRoot, {
+      allowBasenameFallback: false
+    })
+    const workspacePath = await canonicalPath(resolve(expandHomePath(payload.workspaceRoot)))
+    const image = clipboard.readImage()
+    if (image.isEmpty()) {
+      return { ok: false, message: 'Clipboard does not currently contain an image.' }
+    }
+
+    const buffer = image.toPNG()
+    if (!buffer.length) {
+      return { ok: false, message: 'Clipboard image could not be encoded as PNG.' }
+    }
+
+    const imageDir = await resolveTargetPathWithinWorkspace(
+      join(workspacePath, WORKSPACE_IMAGE_DIR),
+      payload.workspaceRoot
+    )
+    await mkdir(imageDir, { recursive: true })
+
+    const targetPath = await resolveTargetPathWithinWorkspace(
+      join(imageDir, buildWorkspaceImageName()),
+      payload.workspaceRoot
+    )
+    await writeFile(targetPath, buffer)
+
+    return {
+      ok: true,
+      path: targetPath,
+      markdownPath: normalizePathSeparators(relative(dirname(currentFilePath), targetPath)),
       createdAt: new Date().toISOString()
     }
   } catch (error) {

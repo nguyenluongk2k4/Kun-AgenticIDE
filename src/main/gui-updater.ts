@@ -1,6 +1,7 @@
 import { app, BrowserWindow } from 'electron'
 import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 import electronUpdater from 'electron-updater'
 import type { ProgressInfo, UpdateDownloadedEvent, UpdateInfo } from 'electron-updater'
 import type {
@@ -11,6 +12,7 @@ import type {
   GuiUpdateInstallResult,
   GuiUpdateState
 } from '../shared/gui-update'
+import { nextGuiUpdateCheckDelay } from '../shared/gui-update-schedule'
 import { DEFAULT_GUI_UPDATE_CHANNEL, normalizeGuiUpdateChannel } from '../shared/gui-update'
 
 const DEFAULT_R2_PUBLIC_BASE_URL = 'https://deepseek-gui.com/api/r2'
@@ -28,6 +30,10 @@ let configuredChannel: GuiUpdateChannel = normalizeGuiUpdateChannel(
 )
 let configuredFeedUrl = ''
 let getSelectedChannel: (() => GuiUpdateChannel | Promise<GuiUpdateChannel>) | null = null
+let backgroundCheckTimer: NodeJS.Timeout | null = null
+let backgroundCheckPromise: Promise<void> | null = null
+
+const GUI_UPDATE_SCHEDULE_FILE = 'gui-update-schedule.json'
 
 function trimSlashes(value: string): string {
   return value.replace(/^\/+|\/+$/g, '')
@@ -56,6 +62,31 @@ function updateFeedUrl(channel: GuiUpdateChannel): string {
   const base = process.env.R2_PUBLIC_BASE_URL?.trim() || DEFAULT_R2_PUBLIC_BASE_URL
   const prefix = process.env.R2_RELEASE_PREFIX?.trim() || DEFAULT_R2_RELEASE_PREFIX
   return `${joinUrl(base, prefix, 'channels', channel, 'latest')}/`
+}
+
+function guiUpdateSchedulePath(): string {
+  return join(app.getPath('userData'), GUI_UPDATE_SCHEDULE_FILE)
+}
+
+async function readLastScheduledCheckAt(): Promise<number | null> {
+  try {
+    const raw = await readFile(guiUpdateSchedulePath(), 'utf8')
+    const parsed = JSON.parse(raw) as { lastCheckedAt?: unknown }
+    const ms = typeof parsed.lastCheckedAt === 'string' ? Date.parse(parsed.lastCheckedAt) : Number.NaN
+    return Number.isFinite(ms) ? ms : null
+  } catch {
+    return null
+  }
+}
+
+async function writeLastScheduledCheckAt(nowMs: number): Promise<void> {
+  const path = guiUpdateSchedulePath()
+  await mkdir(dirname(path), { recursive: true })
+  await writeFile(
+    path,
+    JSON.stringify({ lastCheckedAt: new Date(nowMs).toISOString() }, null, 2),
+    'utf8'
+  )
 }
 
 function normalizeGithubOwnerRepo(raw: string): string | null {
@@ -227,6 +258,49 @@ function emitGuiUpdateState(state: GuiUpdateState): void {
   win.webContents.send('gui:update-state', state)
 }
 
+function clearBackgroundCheckTimer(): void {
+  if (backgroundCheckTimer) {
+    clearTimeout(backgroundCheckTimer)
+    backgroundCheckTimer = null
+  }
+}
+
+function shouldSkipScheduledCheck(): boolean {
+  return (
+    lastState.status === 'checking' ||
+    lastState.status === 'downloading' ||
+    lastState.status === 'downloaded' ||
+    lastState.status === 'installing'
+  )
+}
+
+async function scheduleNextBackgroundCheck(): Promise<void> {
+  clearBackgroundCheckTimer()
+  const lastCheckedAtMs = await readLastScheduledCheckAt()
+  const delay = nextGuiUpdateCheckDelay(lastCheckedAtMs)
+  backgroundCheckTimer = setTimeout(() => {
+    void runScheduledGuiUpdateCheck()
+  }, delay)
+}
+
+async function runScheduledGuiUpdateCheck(): Promise<void> {
+  if (backgroundCheckPromise) return backgroundCheckPromise
+  backgroundCheckPromise = (async () => {
+    try {
+      if (shouldSkipScheduledCheck()) return
+      const nowMs = Date.now()
+      await writeLastScheduledCheckAt(nowMs)
+      await checkGuiUpdate()
+    } catch (error) {
+      console.warn('[deepseek-gui updater] scheduled GUI update check failed:', error)
+    } finally {
+      backgroundCheckPromise = null
+      void scheduleNextBackgroundCheck()
+    }
+  })()
+  return backgroundCheckPromise
+}
+
 async function resolveUpdateChannel(requested?: GuiUpdateChannel): Promise<GuiUpdateChannel> {
   if (requested) return normalizeGuiUpdateChannel(requested)
   if (getSelectedChannel) {
@@ -370,6 +444,8 @@ export function initializeGuiUpdater(
     const message = error instanceof Error ? error.message : String(error)
     emitGuiUpdateState({ status: 'error', info: lastInfo ?? undefined, message, code: 'unknown' })
   })
+
+  void scheduleNextBackgroundCheck()
 }
 
 export function getGuiUpdateState(): GuiUpdateState {
@@ -467,14 +543,17 @@ export async function installGuiUpdate(): Promise<GuiUpdateInstallResult> {
         message: 'The update has not finished downloading yet.'
       }
     }
+    emitGuiUpdateState({ status: 'installing', info: lastInfo ?? undefined })
     autoUpdater.quitAndInstall(false, true)
     return { ok: true }
   } catch (e) {
+    const message = e instanceof Error ? e.message : String(e)
+    emitGuiUpdateState({ status: 'error', info: lastInfo ?? undefined, message, code: 'install_failed' })
     return {
       ok: false,
       currentVersion: app.getVersion(),
       code: 'install_failed',
-      message: e instanceof Error ? e.message : String(e)
+      message
     }
   }
 }

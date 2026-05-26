@@ -39,6 +39,7 @@ import {
   terminalLifecyclePayloadSchema,
   terminalResizePayloadSchema,
   workspaceDirectoryCreatePayloadSchema,
+  workspaceClipboardImageSavePayloadSchema,
   workspaceDirectoryTargetPayloadSchema,
   workspaceEntryDeletePayloadSchema,
   workspaceEntryRenamePayloadSchema,
@@ -46,6 +47,7 @@ import {
   workspaceFileTargetPayloadSchema,
   workspaceFileWatchPayloadSchema,
   workspaceFileWritePayloadSchema,
+  writeExportPayloadSchema,
   writeInlineCompletionPayloadSchema,
   workspaceRootSchema
 } from './app-ipc-schemas'
@@ -67,10 +69,12 @@ import {
   readWorkspaceFile,
   renameWorkspaceEntry,
   resolveWorkspaceFile,
+  saveWorkspaceClipboardImage,
   writeWorkspaceFile
 } from '../services/workspace-service'
 import type { createTerminalService } from '../services/terminal-service'
 import { requestWriteInlineCompletion } from '../services/write-inline-completion-service'
+import { exportWriteDocument } from '../services/write-export-service'
 
 type GuiUpdaterModule = typeof import('../gui-updater')
 type TerminalService = ReturnType<typeof createTerminalService>
@@ -663,6 +667,15 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
       parseIpcPayload('file:create-workspace-directory', workspaceDirectoryCreatePayloadSchema, payload)
     )
   )
+  ipcMain.handle('file:save-workspace-clipboard-image', async (_, payload: unknown) =>
+    saveWorkspaceClipboardImage(
+      parseIpcPayload(
+        'file:save-workspace-clipboard-image',
+        workspaceClipboardImageSavePayloadSchema,
+        payload
+      )
+    )
+  )
   ipcMain.handle('file:rename-workspace-entry', async (_, payload: unknown) =>
     renameWorkspaceEntry(
       parseIpcPayload('file:rename-workspace-entry', workspaceEntryRenamePayloadSchema, payload)
@@ -709,6 +722,12 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
   })
   ipcMain.handle('file:unwatch-workspace', async (_, watchId: unknown) =>
     disposeWorkspaceFileWatch(parseIpcPayload('file:unwatch-workspace', streamIdSchema, watchId))
+  )
+  ipcMain.handle('write:export', async (_, payload: unknown) =>
+    exportWriteDocument(
+      parseIpcPayload('write:export', writeExportPayloadSchema, payload),
+      { parentWindow: getMainWindow() }
+    )
   )
   ipcMain.handle('write:inline-completion', async (_, payload: unknown) =>
     requestWriteInlineCompletion(

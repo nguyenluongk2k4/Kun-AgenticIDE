@@ -98,4 +98,32 @@ describe('write retrieval service', () => {
     expect(result?.snippets[0].text).toContain('BM25 关键词检索')
     expect(result?.snippets.some((snippet) => snippet.path === 'draft.md')).toBe(false)
   })
+
+  it('ignores unsupported large data files while scanning the workspace', async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'ds-gui-write-rag-'))
+    await writeFile(join(workspaceRoot, 'draft.md'), '# Draft\n\nembedding cache', 'utf8')
+    await writeFile(
+      join(workspaceRoot, 'notes.md'),
+      '# Notes\n\nEmbedding cache notes help the inline completion stay consistent.',
+      'utf8'
+    )
+    await writeFile(join(workspaceRoot, 'output.jsonl'), `${'x'.repeat(10_000)}\n`, 'utf8')
+
+    const result = await retrieveWriteInlineCompletionContext({
+      ...createRequest(workspaceRoot),
+      prefix: '# Draft\n\nembedding cache',
+      context: {
+        ...createRequest(workspaceRoot).context,
+        currentLinePrefix: 'embedding cache',
+        previousNonEmptyLine: '# Draft'
+      },
+      preview: {
+        local: 'embedding cache',
+        documentTail: '# Draft embedding cache'
+      }
+    })
+
+    expect(result?.snippets.some((snippet) => snippet.path === 'output.jsonl')).toBe(false)
+    expect(result?.snippets.some((snippet) => snippet.path === 'notes.md')).toBe(true)
+  })
 })

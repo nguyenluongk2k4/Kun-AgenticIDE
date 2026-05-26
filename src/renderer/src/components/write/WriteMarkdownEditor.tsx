@@ -40,6 +40,8 @@ type Props = {
   workspaceRoot?: string | null
   filePath?: string | null
   appearance?: 'source' | 'live'
+  livePreviewEnabled?: boolean
+  readOnly?: boolean
   completionModel: string
   completionEnabled: boolean
   completionDebounceMs: number
@@ -50,6 +52,8 @@ type Props = {
   onChange: (value: string) => void
   onSelectionChange: (selection: WriteEditorSelectionState) => void
   onSaveShortcut: () => void
+  onImagePasteSaved?: () => void
+  onImagePasteError?: (message: string) => void
 }
 
 const externalValueSyncAnnotation = Annotation.define<boolean>()
@@ -177,11 +181,36 @@ function buildEditorTheme(appearance: 'source' | 'live'): Extension {
   })
 }
 
+function hasClipboardImage(event: ClipboardEvent): boolean {
+  const items = event.clipboardData?.items
+  if (!items) return false
+  return Array.from(items).some((item) => item.kind === 'file' && item.type.startsWith('image/'))
+}
+
+function buildPastedImageMarkdown(
+  state: EditorState,
+  from: number,
+  to: number,
+  markdownPath: string
+): { text: string; cursor: number } {
+  const before = from > 0 ? state.sliceDoc(from - 1, from) : ''
+  const after = to < state.doc.length ? state.sliceDoc(to, to + 1) : ''
+  const leadingBreak = from > 0 && before !== '\n' ? '\n' : ''
+  const trailingBreak = after && after !== '\n' ? '\n' : ''
+  const text = `${leadingBreak}![Pasted image](${markdownPath})${trailingBreak}\n`
+  return {
+    text,
+    cursor: from + text.length
+  }
+}
+
 export function WriteMarkdownEditor({
   value,
   workspaceRoot,
   filePath,
   appearance = 'live',
+  livePreviewEnabled = appearance === 'live',
+  readOnly = false,
   completionModel,
   completionEnabled,
   completionDebounceMs,
@@ -191,14 +220,19 @@ export function WriteMarkdownEditor({
   completionLongMinAcceptScore,
   onChange,
   onSelectionChange,
-  onSaveShortcut
+  onSaveShortcut,
+  onImagePasteSaved,
+  onImagePasteError
 }: Props): ReactElement {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const viewRef = useRef<EditorView | null>(null)
   const themeCompartmentRef = useRef<Compartment | null>(null)
   const livePreviewCompartmentRef = useRef<Compartment | null>(null)
+  const editableCompartmentRef = useRef<Compartment | null>(null)
   const workspaceRootRef = useRef(workspaceRoot ?? '')
   const filePathRef = useRef(filePath ?? '')
+  const livePreviewEnabledRef = useRef(livePreviewEnabled)
+  const readOnlyRef = useRef(readOnly)
   const completionModelRef = useRef(completionModel)
   const completionEnabledRef = useRef(completionEnabled)
   const completionDebounceMsRef = useRef(completionDebounceMs)
@@ -210,10 +244,14 @@ export function WriteMarkdownEditor({
   const onChangeRef = useRef(onChange)
   const onSelectionChangeRef = useRef(onSelectionChange)
   const onSaveShortcutRef = useRef(onSaveShortcut)
+  const onImagePasteSavedRef = useRef(onImagePasteSaved)
+  const onImagePasteErrorRef = useRef(onImagePasteError)
   const valueRef = useRef(value)
 
   workspaceRootRef.current = workspaceRoot ?? ''
   filePathRef.current = filePath ?? ''
+  livePreviewEnabledRef.current = livePreviewEnabled
+  readOnlyRef.current = readOnly
   completionModelRef.current = completionModel
   completionEnabledRef.current = completionEnabled
   completionDebounceMsRef.current = completionDebounceMs
@@ -225,6 +263,8 @@ export function WriteMarkdownEditor({
   onChangeRef.current = onChange
   onSelectionChangeRef.current = onSelectionChange
   onSaveShortcutRef.current = onSaveShortcut
+  onImagePasteSavedRef.current = onImagePasteSaved
+  onImagePasteErrorRef.current = onImagePasteError
   valueRef.current = value
 
   useEffect(() => {
@@ -233,15 +273,17 @@ export function WriteMarkdownEditor({
     const inlineCompletionCompartment = new Compartment()
     const themeCompartment = new Compartment()
     const livePreviewCompartment = new Compartment()
+    const editableCompartment = new Compartment()
     themeCompartmentRef.current = themeCompartment
     livePreviewCompartmentRef.current = livePreviewCompartment
+    editableCompartmentRef.current = editableCompartment
     const inlineCompletionExtension = buildInlineCompletionExtension({
       getDebounceMs: () => completionDebounceMsRef.current,
       getMinAcceptScore: () => completionMinAcceptScoreRef.current,
       getLongDebounceMs: () => completionLongDebounceMsRef.current,
       getLongMinAcceptScore: () => completionLongMinAcceptScoreRef.current,
       isLongEnabled: () => completionLongEnabledRef.current,
-      isEnabled: () => completionEnabledRef.current,
+      isEnabled: () => completionEnabledRef.current && !readOnlyRef.current,
       getFilePath: () => filePathRef.current,
       language: 'markdown',
       getModel: () => completionModelRef.current,
@@ -264,10 +306,14 @@ export function WriteMarkdownEditor({
       extensions: [
         themeCompartment.of(buildEditorTheme(appearanceRef.current)),
         livePreviewCompartment.of(
-          appearanceRef.current === 'live'
+          appearanceRef.current === 'live' && livePreviewEnabledRef.current
             ? writeMarkdownLivePreviewExtensions(filePathRef.current)
             : []
         ),
+        editableCompartment.of([
+          EditorState.readOnly.of(readOnlyRef.current),
+          EditorView.editable.of(!readOnlyRef.current)
+        ]),
         markdown({ base: markdownLanguage, codeLanguages: languages }),
         history(),
         drawSelection(),
@@ -287,6 +333,57 @@ export function WriteMarkdownEditor({
             }
           }
         ]),
+        EditorView.domEventHandlers({
+          paste(event, view) {
+            if (readOnlyRef.current) return false
+            if (!hasClipboardImage(event)) return false
+            const nextWorkspaceRoot = workspaceRootRef.current.trim()
+            const nextFilePath = filePathRef.current.trim()
+            if (!nextWorkspaceRoot || !nextFilePath) {
+              onImagePasteErrorRef.current?.('Open a workspace file before pasting an image.')
+              event.preventDefault()
+              return true
+            }
+            if (typeof window.dsGui?.saveWorkspaceClipboardImage !== 'function') return false
+
+            event.preventDefault()
+            void window.dsGui
+              .saveWorkspaceClipboardImage({
+                workspaceRoot: nextWorkspaceRoot,
+                currentFilePath: nextFilePath
+              })
+              .then((result) => {
+                if (!result.ok) {
+                  onImagePasteErrorRef.current?.(result.message)
+                  return
+                }
+                const selection = view.state.selection.main
+                const insertion = buildPastedImageMarkdown(
+                  view.state,
+                  selection.from,
+                  selection.to,
+                  result.markdownPath
+                )
+                view.focus()
+                view.dispatch({
+                  changes: {
+                    from: selection.from,
+                    to: selection.to,
+                    insert: insertion.text
+                  },
+                  selection: EditorSelection.cursor(insertion.cursor),
+                  scrollIntoView: true
+                })
+                onImagePasteSavedRef.current?.()
+              })
+              .catch((error) => {
+                onImagePasteErrorRef.current?.(
+                  error instanceof Error ? error.message : String(error)
+                )
+              })
+            return true
+          }
+        }),
         inlineCompletionCompartment.of(inlineCompletionExtension),
         EditorView.updateListener.of((update) => {
           const externalValueSync = update.transactions.some((transaction) =>
@@ -314,6 +411,7 @@ export function WriteMarkdownEditor({
       viewRef.current = null
       themeCompartmentRef.current = null
       livePreviewCompartmentRef.current = null
+      editableCompartmentRef.current = null
     }
   }, [])
 
@@ -321,16 +419,21 @@ export function WriteMarkdownEditor({
     const view = viewRef.current
     const themeCompartment = themeCompartmentRef.current
     const livePreviewCompartment = livePreviewCompartmentRef.current
-    if (!view || !themeCompartment || !livePreviewCompartment) return
+    const editableCompartment = editableCompartmentRef.current
+    if (!view || !themeCompartment || !livePreviewCompartment || !editableCompartment) return
     view.dispatch({
       effects: [
         themeCompartment.reconfigure(buildEditorTheme(appearance)),
         livePreviewCompartment.reconfigure(
-          appearance === 'live' ? writeMarkdownLivePreviewExtensions(filePath) : []
-        )
+          appearance === 'live' && livePreviewEnabled ? writeMarkdownLivePreviewExtensions(filePath) : []
+        ),
+        editableCompartment.reconfigure([
+          EditorState.readOnly.of(readOnly),
+          EditorView.editable.of(!readOnly)
+        ])
       ]
     })
-  }, [appearance, filePath])
+  }, [appearance, filePath, livePreviewEnabled, readOnly])
 
   useEffect(() => {
     const view = viewRef.current

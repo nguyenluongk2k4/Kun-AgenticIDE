@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { GUI_UPDATE_CHANNELS } from '../../shared/gui-update'
+import { WRITE_EXPORT_FORMATS } from '../../shared/write-export'
 
 const MAX_BODY_BYTES = 2_000_000
 const MAX_PATH_LENGTH = 4_096
@@ -143,6 +144,13 @@ export const workspaceDirectoryCreatePayloadSchema = z
   })
   .strict()
 
+export const workspaceClipboardImageSavePayloadSchema = z
+  .object({
+    workspaceRoot: trimmedString(MAX_PATH_LENGTH),
+    currentFilePath: trimmedString(MAX_PATH_LENGTH)
+  })
+  .strict()
+
 export const workspaceEntryRenamePayloadSchema = z
   .object({
     path: trimmedString(MAX_PATH_LENGTH),
@@ -162,6 +170,15 @@ export const workspaceFileWatchPayloadSchema = z
   .object({
     path: trimmedString(MAX_PATH_LENGTH),
     workspaceRoot: trimmedString(MAX_PATH_LENGTH)
+  })
+  .strict()
+
+export const writeExportPayloadSchema = z
+  .object({
+    path: trimmedString(MAX_PATH_LENGTH),
+    workspaceRoot: optionalTrimmedString(MAX_PATH_LENGTH),
+    format: z.enum(WRITE_EXPORT_FORMATS),
+    content: z.string().max(MAX_BODY_BYTES)
   })
   .strict()
 

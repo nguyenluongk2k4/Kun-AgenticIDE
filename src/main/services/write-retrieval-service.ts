@@ -1,9 +1,11 @@
 import { open as openFile, readdir, stat } from 'node:fs/promises'
 import { basename, extname, isAbsolute, join, relative, resolve } from 'node:path'
 import type { WriteInlineCompletionRequest } from '../../shared/write-inline-completion'
+import { isWriteTextFileExtension } from '../../shared/write-text-file'
 import { expandHomePath } from './workspace-service'
 
 const INDEX_CACHE_TTL_MS = 30_000
+const MAX_INDEX_BUILD_MS = 250
 const MAX_SCAN_ENTRIES = 8_000
 const MAX_INDEX_FILES = 160
 const MAX_FILE_BYTES = 600_000
@@ -15,7 +17,6 @@ const MAX_QUERY_TERMS = 36
 const DEFAULT_MAX_SNIPPETS = 3
 const MAX_SNIPPET_CHARS = 520
 
-const INDEXED_EXTENSIONS = new Set(['.md', '.markdown', '.mdx', '.txt'])
 const SKIP_DIRS = new Set([
   '.git',
   '.hg',
@@ -25,7 +26,23 @@ const SKIP_DIRS = new Set([
   'out',
   'build',
   '.next',
-  'coverage'
+  'coverage',
+  '.cache',
+  '.idea',
+  '.pnpm-store',
+  '.turbo',
+  '.venv',
+  '.vscode',
+  '.yarn',
+  '.yarn-cache',
+  '.parcel-cache',
+  'log',
+  'logs',
+  'target',
+  'temp',
+  'tmp',
+  'vendor',
+  'venv'
 ])
 
 const STOP_WORDS = new Set([
@@ -112,6 +129,11 @@ type QueryModel = {
 }
 
 const indexCache = new Map<string, WorkspaceIndex>()
+const inFlightIndexCache = new Map<string, Promise<WorkspaceIndex>>()
+
+function deadlineExceeded(deadline: number): boolean {
+  return Date.now() > deadline
+}
 
 function compactText(text = ''): string {
   return String(text || '').replace(/\r\n?/g, '\n').replace(/\s+/g, ' ').trim()
@@ -185,15 +207,20 @@ function resolveComparablePath(raw: string | undefined): string {
 }
 
 function isIndexedFile(path: string): boolean {
-  return INDEXED_EXTENSIONS.has(extname(path).toLowerCase())
+  return isWriteTextFileExtension(extname(path).toLowerCase())
 }
 
-async function scanWorkspaceFiles(workspaceRoot: string): Promise<string[]> {
+async function scanWorkspaceFiles(workspaceRoot: string, deadline: number): Promise<string[]> {
   const files: string[] = []
   const stack = [workspaceRoot]
   let scanned = 0
 
-  while (stack.length > 0 && scanned < MAX_SCAN_ENTRIES && files.length < MAX_INDEX_FILES) {
+  while (
+    stack.length > 0 &&
+    scanned < MAX_SCAN_ENTRIES &&
+    files.length < MAX_INDEX_FILES &&
+    !deadlineExceeded(deadline)
+  ) {
     const current = stack.pop()!
     let entries
     try {
@@ -204,6 +231,7 @@ async function scanWorkspaceFiles(workspaceRoot: string): Promise<string[]> {
 
     entries.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))
     for (const entry of entries) {
+      if (deadlineExceeded(deadline)) break
       scanned += 1
       if (scanned >= MAX_SCAN_ENTRIES || files.length >= MAX_INDEX_FILES) break
       if (entry.name === '.DS_Store') continue
@@ -295,31 +323,34 @@ function chunkMarkdown(path: string, relativePath: string, content: string): Ind
   return chunks
 }
 
-async function readIndexableFile(path: string): Promise<string> {
+async function readIndexableFile(path: string, deadline: number): Promise<string> {
+  if (deadlineExceeded(deadline)) return ''
   const info = await stat(path)
   if (!info.isFile() || info.size <= 0) return ''
   const maxBytes = Math.min(info.size, MAX_FILE_BYTES)
   const handle = await openFile(path, 'r')
   try {
-    const buffer = Buffer.alloc(maxBytes)
-    const { bytesRead } = await handle.read(buffer, 0, maxBytes, 0)
-    const bytes = buffer.subarray(0, bytesRead)
-    if (bytes.includes(0)) return ''
-    return bytes.toString('utf8')
+      const buffer = Buffer.alloc(maxBytes)
+      const { bytesRead } = await handle.read(buffer, 0, maxBytes, 0)
+      const bytes = buffer.subarray(0, bytesRead)
+      if (bytes.includes(0)) return ''
+      if (deadlineExceeded(deadline)) return ''
+      return bytes.toString('utf8')
   } finally {
     await handle.close()
   }
 }
 
 async function buildWorkspaceIndex(workspaceRoot: string): Promise<WorkspaceIndex> {
-  const files = await scanWorkspaceFiles(workspaceRoot)
+  const deadline = Date.now() + MAX_INDEX_BUILD_MS
+  const files = await scanWorkspaceFiles(workspaceRoot, deadline)
   const chunks: IndexedChunk[] = []
   let indexedFiles = 0
 
   for (const path of files) {
-    if (chunks.length >= MAX_INDEX_CHUNKS) break
+    if (chunks.length >= MAX_INDEX_CHUNKS || deadlineExceeded(deadline)) break
     try {
-      const content = await readIndexableFile(path)
+      const content = await readIndexableFile(path, deadline)
       if (!content.trim()) continue
       const relativePath = relative(workspaceRoot, path) || basename(path)
       const fileChunks = chunkMarkdown(path, relativePath, content)
@@ -352,9 +383,20 @@ async function buildWorkspaceIndex(workspaceRoot: string): Promise<WorkspaceInde
 async function loadWorkspaceIndex(workspaceRoot: string): Promise<WorkspaceIndex> {
   const cached = indexCache.get(workspaceRoot)
   if (cached && Date.now() - cached.builtAt <= INDEX_CACHE_TTL_MS) return cached
-  const index = await buildWorkspaceIndex(workspaceRoot)
-  indexCache.set(workspaceRoot, index)
-  return index
+  const existing = inFlightIndexCache.get(workspaceRoot)
+  if (existing) return existing
+
+  const build = buildWorkspaceIndex(workspaceRoot)
+    .then((index) => {
+      indexCache.set(workspaceRoot, index)
+      return index
+    })
+    .finally(() => {
+      inFlightIndexCache.delete(workspaceRoot)
+    })
+
+  inFlightIndexCache.set(workspaceRoot, build)
+  return build
 }
 
 function addWeightedTerms(weights: Map<string, number>, text: string, weight: number): void {
@@ -539,4 +581,5 @@ export async function retrieveWriteInlineCompletionContext(
 
 export function clearWriteRetrievalCache(): void {
   indexCache.clear()
+  inFlightIndexCache.clear()
 }
