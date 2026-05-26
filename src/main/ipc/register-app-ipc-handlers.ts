@@ -48,6 +48,7 @@ import {
   workspaceFileWatchPayloadSchema,
   workspaceFileWritePayloadSchema,
   writeExportPayloadSchema,
+  writeRichClipboardPayloadSchema,
   writeInlineCompletionPayloadSchema,
   workspaceRootSchema
 } from './app-ipc-schemas'
@@ -75,7 +76,7 @@ import {
 } from '../services/workspace-service'
 import type { createTerminalService } from '../services/terminal-service'
 import { requestWriteInlineCompletion } from '../services/write-inline-completion-service'
-import { exportWriteDocument } from '../services/write-export-service'
+import { copyWriteDocumentAsRichText, exportWriteDocument } from '../services/write-export-service'
 
 type GuiUpdaterModule = typeof import('../gui-updater')
 type TerminalService = ReturnType<typeof createTerminalService>
@@ -749,6 +750,11 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
     exportWriteDocument(
       parseIpcPayload('write:export', writeExportPayloadSchema, payload),
       { parentWindow: getMainWindow() }
+    )
+  )
+  ipcMain.handle('write:copy-rich-text', async (_, payload: unknown) =>
+    copyWriteDocumentAsRichText(
+      parseIpcPayload('write:copy-rich-text', writeRichClipboardPayloadSchema, payload)
     )
   )
   ipcMain.handle('write:inline-completion', async (_, payload: unknown) =>

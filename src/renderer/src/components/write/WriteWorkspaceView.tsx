@@ -3,6 +3,7 @@ import {
   BookOpen,
   ChevronDown,
   Columns2,
+  Copy,
   CornerDownLeft,
   Download,
   Eye,
@@ -57,6 +58,7 @@ const IMAGE_MIN_ZOOM = 25
 const IMAGE_MAX_ZOOM = 300
 const IMAGE_ZOOM_STEP = 25
 const WRITE_EXPORT_FORMATS: WriteExportFormat[] = ['html', 'pdf', 'doc', 'docx']
+const WRITE_RICH_CLIPBOARD_ACTION = 'clipboard'
 
 type WriteNotice = {
   tone: 'success' | 'error'
@@ -343,7 +345,7 @@ export function WriteWorkspaceView({
   const [inlineAgentValue, setInlineAgentValue] = useState('')
   const [inlineAgentOpen, setInlineAgentOpen] = useState(false)
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
-  const [exportingFormat, setExportingFormat] = useState<WriteExportFormat | null>(null)
+  const [exportingFormat, setExportingFormat] = useState<WriteExportFormat | typeof WRITE_RICH_CLIPBOARD_ACTION | null>(null)
   const [exportNotice, setExportNotice] = useState<WriteNotice | null>(null)
   const workspaceReady = workspaceRoot.trim().length > 0
   const activeFileIsImage = activeFileKind === 'image'
@@ -477,6 +479,47 @@ export function WriteWorkspaceView({
         tone: 'error',
         message: t('writeExportFailed', {
           format: exportFormatLabel(format, t),
+          message: error instanceof Error ? error.message : String(error)
+        })
+      })
+    } finally {
+      setExportingFormat(null)
+    }
+  }
+
+  const copyCurrentFileAsRichText = async (): Promise<void> => {
+    if (!activeFilePath) return
+    if (!activeFileIsText) return
+    if (typeof window.dsGui?.copyWriteDocumentAsRichText !== 'function') {
+      showExportNotice({ tone: 'error', message: t('writeCopyRichTextUnavailable') })
+      return
+    }
+
+    setExportMenuOpen(false)
+    setExportingFormat(WRITE_RICH_CLIPBOARD_ACTION)
+    try {
+      const result = await window.dsGui.copyWriteDocumentAsRichText({
+        path: activeFilePath,
+        workspaceRoot,
+        content: fileContent
+      })
+      if (!result.ok) {
+        showExportNotice({
+          tone: 'error',
+          message: t('writeCopyRichTextFailed', {
+            message: result.message
+          })
+        })
+        return
+      }
+      showExportNotice({
+        tone: 'success',
+        message: t('writeCopyRichTextSuccess')
+      })
+    } catch (error) {
+      showExportNotice({
+        tone: 'error',
+        message: t('writeCopyRichTextFailed', {
           message: error instanceof Error ? error.message : String(error)
         })
       })
@@ -789,6 +832,16 @@ export function WriteWorkspaceView({
                   role="menu"
                   className="absolute right-0 top-full z-30 mt-2 w-52 overflow-hidden rounded-2xl border border-ds-border bg-ds-card/95 p-1.5 shadow-[0_22px_48px_rgba(15,23,42,0.16)] backdrop-blur-xl"
                 >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => void copyCurrentFileAsRichText()}
+                    className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-[13px] text-ds-ink transition hover:bg-ds-hover/80"
+                  >
+                    <span>{t('writeCopyRichText')}</span>
+                    <Copy className="h-3.5 w-3.5 text-ds-faint" strokeWidth={1.9} />
+                  </button>
+                  <div className="my-1 h-px bg-ds-border-muted" />
                   {WRITE_EXPORT_FORMATS.map((format) => (
                     <button
                       key={format}

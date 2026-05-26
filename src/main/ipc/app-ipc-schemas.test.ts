@@ -10,6 +10,7 @@ import {
   workspaceEntryDeletePayloadSchema,
   workspaceEntryRenamePayloadSchema,
   writeExportPayloadSchema,
+  writeRichClipboardPayloadSchema,
   writeInlineCompletionPayloadSchema
 } from './app-ipc-schemas'
 
@@ -150,6 +151,17 @@ describe('app-ipc-schemas', () => {
 
     expect(payload.path).toBe('/tmp/workspace/draft.md')
     expect(payload.format).toBe('docx')
+    expect(payload.content).toBe('# Draft')
+  })
+
+  it('accepts write rich clipboard payloads', () => {
+    const payload = writeRichClipboardPayloadSchema.parse({
+      path: '/tmp/workspace/draft.md',
+      workspaceRoot: '/tmp/workspace',
+      content: '# Draft'
+    })
+
+    expect(payload.path).toBe('/tmp/workspace/draft.md')
     expect(payload.content).toBe('# Draft')
   })
 })

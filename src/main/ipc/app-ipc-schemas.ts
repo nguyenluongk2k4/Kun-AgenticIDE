@@ -182,6 +182,14 @@ export const writeExportPayloadSchema = z
   })
   .strict()
 
+export const writeRichClipboardPayloadSchema = z
+  .object({
+    path: trimmedString(MAX_PATH_LENGTH),
+    workspaceRoot: optionalTrimmedString(MAX_PATH_LENGTH),
+    content: z.string().max(MAX_BODY_BYTES)
+  })
+  .strict()
+
 export const writeInlineCompletionPayloadSchema = z
   .object({
     prefix: z.string().max(MAX_EDITOR_COMPLETION_TEXT),

@@ -51,7 +51,12 @@ import type {
   WriteInlineCompletionRequest,
   WriteInlineCompletionResult
 } from './write-inline-completion'
-import type { WriteExportPayload, WriteExportResult } from './write-export'
+import type {
+  WriteExportPayload,
+  WriteExportResult,
+  WriteRichClipboardPayload,
+  WriteRichClipboardResult
+} from './write-export'
 
 export type RuntimeRequestResult = { ok: boolean; status: number; body: string }
 export type WorkspacePickResult = { canceled: boolean; path: string | null }
@@ -197,6 +202,9 @@ export type DsGuiApi = {
     payload: WriteInlineCompletionRequest
   ) => Promise<WriteInlineCompletionResult>
   exportWriteDocument: (payload: WriteExportPayload) => Promise<WriteExportResult>
+  copyWriteDocumentAsRichText: (
+    payload: WriteRichClipboardPayload
+  ) => Promise<WriteRichClipboardResult>
   startSse: (threadId: string, sinceSeq: number, streamId?: string) => Promise<{ streamId: string }>
   stopSse: (streamId: string) => Promise<boolean>
   onSseEvent: (handler: (payload: SseEventPayload) => void) => () => void

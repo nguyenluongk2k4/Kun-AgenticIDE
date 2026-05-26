@@ -104,6 +104,8 @@ const api = {
   },
   exportWriteDocument: (payload) =>
     ipcRenderer.invoke('write:export', payload),
+  copyWriteDocumentAsRichText: (payload) =>
+    ipcRenderer.invoke('write:copy-rich-text', payload),
   requestWriteInlineCompletion: (payload) =>
     ipcRenderer.invoke('write:inline-completion', payload),
   startSse: (threadId, sinceSeq, streamId) =>

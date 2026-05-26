@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog } from 'electron'
+import { BrowserWindow, clipboard, dialog } from 'electron'
 import { createRequire } from 'node:module'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -9,7 +9,13 @@ import { createElement, type ComponentPropsWithoutRef, type ReactNode } from 're
 import { renderToStaticMarkup } from 'react-dom/server'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { WriteExportFormat, WriteExportPayload, WriteExportResult } from '../../shared/write-export'
+import type {
+  WriteExportFormat,
+  WriteExportPayload,
+  WriteExportResult,
+  WriteRichClipboardPayload,
+  WriteRichClipboardResult
+} from '../../shared/write-export'
 import { resolveWriteMarkdownResource } from '../../shared/write-markdown-resource'
 import { resolveWorkspaceFile } from './workspace-service'
 
@@ -347,6 +353,17 @@ function renderMarkdownFragment(content: string, sourcePath: string): string {
   )
 }
 
+export async function buildWriteClipboardHtmlFragment(options: {
+  sourcePath: string
+  content: string
+}): Promise<string> {
+  const fragment = isMarkdownFile(options.sourcePath)
+    ? renderMarkdownFragment(options.content, options.sourcePath)
+    : renderPlainTextFragment(options.content)
+  const body = await inlineLocalImagesInHtml(fragment)
+  return `<article class="markdown-body">${body}</article>`
+}
+
 export function buildWriteExportFileName(sourcePath: string, format: WriteExportFormat): string {
   return `${basenameWithoutExtension(sourcePath)}${exportExtension(format)}`
 }
@@ -358,10 +375,10 @@ export async function buildWriteExportHtmlDocument(options: {
   wordCompatible?: boolean
 }): Promise<string> {
   const title = options.title?.trim() || basenameWithoutExtension(options.sourcePath)
-  const fragment = isMarkdownFile(options.sourcePath)
-    ? renderMarkdownFragment(options.content, options.sourcePath)
-    : renderPlainTextFragment(options.content)
-  const body = await inlineLocalImagesInHtml(fragment)
+  const body = await buildWriteClipboardHtmlFragment({
+    sourcePath: options.sourcePath,
+    content: options.content
+  })
   const baseHref = pathToFileURL(`${dirname(options.sourcePath)}/`).href
   const namespaces = options.wordCompatible
     ? ' xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"'
@@ -379,11 +396,48 @@ export async function buildWriteExportHtmlDocument(options: {
     '</head>',
     '<body>',
     '  <main class="document-shell">',
-    `    <article class="markdown-body">${body}</article>`,
+    `    ${body}`,
     '  </main>',
     '</body>',
     '</html>'
   ].join('\n')
+}
+
+export async function copyWriteDocumentAsRichText(
+  payload: WriteRichClipboardPayload
+): Promise<WriteRichClipboardResult> {
+  try {
+    const resolved = await resolveWorkspaceFile({
+      path: payload.path,
+      workspaceRoot: payload.workspaceRoot
+    })
+    if (!resolved.ok) {
+      return {
+        ok: false,
+        message: resolved.message
+      }
+    }
+
+    const html = await buildWriteClipboardHtmlFragment({
+      sourcePath: resolved.path,
+      content: payload.content
+    })
+
+    clipboard.write({
+      html,
+      text: payload.content
+    })
+
+    return {
+      ok: true,
+      copiedAt: new Date().toISOString()
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : String(error)
+    }
+  }
 }
 
 async function bufferFromDocxResult(result: ArrayBuffer | Blob): Promise<Buffer> {

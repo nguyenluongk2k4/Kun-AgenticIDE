@@ -279,17 +279,63 @@ class TableWidget extends WidgetType {
 }
 
 class CodeBlockWidget extends WidgetType {
-  constructor(private block: ParsedCodeBlock) {
+  constructor(
+    private block: ParsedCodeBlock,
+    private from: number,
+    private to: number
+  ) {
     super()
   }
 
   eq(other: CodeBlockWidget): boolean {
-    return other.block.code === this.block.code && other.block.language === this.block.language
+    return other.block.code === this.block.code &&
+      other.block.language === this.block.language &&
+      other.from === this.from &&
+      other.to === this.to
   }
 
-  toDOM(): HTMLElement {
+  private lineIndexFromClick(event: MouseEvent, html: HTMLElement): number {
+    const lines = Array.from(html.querySelectorAll<HTMLElement>('.line'))
+    if (lines.length === 0) return 0
+
+    const target = event.target instanceof Element ? event.target.closest<HTMLElement>('.line') : null
+    const targetIndex = target ? lines.indexOf(target) : -1
+    if (targetIndex >= 0) return targetIndex
+
+    const firstRect = lines[0].getBoundingClientRect()
+    const lastRect = lines[lines.length - 1].getBoundingClientRect()
+    if (event.clientY <= firstRect.top) return 0
+    if (event.clientY >= lastRect.bottom) return lines.length - 1
+
+    const index = lines.findIndex((line) => {
+      const rect = line.getBoundingClientRect()
+      return event.clientY >= rect.top && event.clientY <= rect.bottom
+    })
+    return index >= 0 ? index : 0
+  }
+
+  private editSourceAtClick(view: EditorView, event: MouseEvent, html: HTMLElement): void {
+    const startLine = view.state.doc.lineAt(this.from)
+    const endLine = view.state.doc.lineAt(Math.max(this.from, this.to - 1))
+    const sourceLineNumber = Math.min(
+      endLine.number,
+      startLine.number + 1 + this.lineIndexFromClick(event, html)
+    )
+    const sourceLine = view.state.doc.line(sourceLineNumber)
+    const columnOffset = Math.min(sourceLine.length, Math.max(0, Math.round((event.offsetX - 20) / 8)))
+
+    view.focus()
+    view.dispatch({
+      selection: EditorSelection.cursor(sourceLine.from + columnOffset),
+      scrollIntoView: true
+    })
+  }
+
+  toDOM(view: EditorView): HTMLElement {
     const wrapper = document.createElement('div')
     wrapper.className = 'cm-write-md-code-block'
+    wrapper.tabIndex = -1
+    wrapper.title = 'Click to edit code'
 
     if (this.block.language) {
       const label = document.createElement('div')
@@ -305,6 +351,12 @@ class CodeBlockWidget extends WidgetType {
     html.innerHTML = renderFallbackCodeHtml(this.block.code)
     body.appendChild(html)
     wrapper.appendChild(body)
+
+    wrapper.addEventListener('mousedown', (event) => {
+      if (event.button !== 0) return
+      event.preventDefault()
+      this.editSourceAtClick(view, event, html)
+    })
 
     void highlightCodeHtml(this.block.code, this.block.language).then((nextHtml) => {
       if (!wrapper.isConnected) return
@@ -560,13 +612,14 @@ function collectMarkdownCodeBlockRangesFromState(
   _activeLines: Set<number>
 ): CodeBlockRange[] {
   const blocks: CodeBlockRange[] = []
-  let line = state.doc.lineAt(from)
-  const endLine = state.doc.lineAt(to).number
+  let line = state.doc.line(1)
+  const rangeFrom = Math.max(0, from)
+  const rangeTo = Math.max(rangeFrom, to)
 
-  while (line.number <= endLine) {
+  while (line.number <= state.doc.lines) {
     const fence = openingFence(line.text)
     if (!fence) {
-      if (line.to >= to || line.number >= state.doc.lines) break
+      if (line.number >= state.doc.lines) break
       line = state.doc.line(line.number + 1)
       continue
     }
@@ -581,14 +634,20 @@ function collectMarkdownCodeBlockRangesFromState(
       nextNumber += 1
     }
 
-    const source = state.doc.sliceString(line.from, lastLine.to)
-    blocks.push({ from: line.from, to: lastLine.to, block: parseFencedCodeBlock(source) })
+    if (lastLine.to >= rangeFrom && line.from <= rangeTo) {
+      const source = state.doc.sliceString(line.from, lastLine.to)
+      blocks.push({ from: line.from, to: lastLine.to, block: parseFencedCodeBlock(source) })
+    }
 
-    if (lastLine.number >= endLine || lastLine.to >= to || lastLine.number >= state.doc.lines) break
+    if (lastLine.number >= state.doc.lines) break
     line = state.doc.line(lastLine.number + 1)
   }
 
   return blocks
+}
+
+export const markdownLivePreviewTestInternals = {
+  collectMarkdownCodeBlockRangesFromState
 }
 
 function addFencedCodeLineDecorations(
@@ -675,7 +734,10 @@ function buildMarkdownBlockDecorations(state: EditorState): DecorationSet {
     ranges.push({
       from: codeRange.from,
       to: codeRange.to,
-      deco: Decoration.replace({ widget: new CodeBlockWidget(codeRange.block), block: true })
+      deco: Decoration.replace({
+        widget: new CodeBlockWidget(codeRange.block, codeRange.from, codeRange.to),
+        block: true
+      })
     })
   }
 

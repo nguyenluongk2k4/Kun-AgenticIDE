@@ -6,21 +6,28 @@ import { pathToFileURL } from 'node:url'
 
 vi.mock('electron', () => ({
   BrowserWindow: class BrowserWindow {},
+  clipboard: {
+    write: vi.fn()
+  },
   dialog: {
     showSaveDialog: vi.fn()
   }
 }))
 
 import {
+  buildWriteClipboardHtmlFragment,
   buildWriteExportFileName,
-  buildWriteExportHtmlDocument
+  buildWriteExportHtmlDocument,
+  copyWriteDocumentAsRichText
 } from './write-export-service'
+import { clipboard } from 'electron'
 
 describe('write-export-service helpers', () => {
   let workspaceRoot = ''
 
   beforeEach(async () => {
     workspaceRoot = await mkdtemp(join(tmpdir(), 'ds-gui-write-export-'))
+    vi.mocked(clipboard.write).mockReset()
   })
 
   it('builds export file names with the requested extension', () => {
@@ -43,5 +50,56 @@ describe('write-export-service helpers', () => {
     expect(html).toContain('<h1>Heading</h1>')
     expect(html).toContain('src="data:image/png;base64,')
     expect(html).toContain(`href="${pathToFileURL(join(workspaceRoot, 'notes.md')).href}"`)
+  })
+
+  it('renders clipboard html fragments for markdown content', async () => {
+    const sourcePath = join(workspaceRoot, 'draft.md')
+    const html = await buildWriteClipboardHtmlFragment({
+      sourcePath,
+      content: '# Heading\n\n**Bold**\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\n[Notes](./notes.md)'
+    })
+
+    expect(html).toContain('<article class="markdown-body">')
+    expect(html).toContain('<h1>Heading</h1>')
+    expect(html).toContain('<strong>Bold</strong>')
+    expect(html).toContain('<table>')
+    expect(html).toContain(`href="${pathToFileURL(join(workspaceRoot, 'notes.md')).href}"`)
+  })
+
+  it('renders clipboard html fragments for plain text content', async () => {
+    const sourcePath = join(workspaceRoot, 'draft.txt')
+    const html = await buildWriteClipboardHtmlFragment({
+      sourcePath,
+      content: 'plain text\nline two'
+    })
+
+    expect(html).toContain('<article class="markdown-body">')
+    expect(html).toContain('<pre class="plain-text">plain text\nline two</pre>')
+  })
+
+  it('writes html and plain text to the clipboard', async () => {
+    const sourcePath = join(workspaceRoot, 'draft.md')
+    const imagePath = join(workspaceRoot, 'cover.png')
+    await writeFile(sourcePath, '# Heading\n\n![Cover](./cover.png)')
+    await writeFile(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+
+    const result = await copyWriteDocumentAsRichText({
+      path: sourcePath,
+      workspaceRoot,
+      content: '# Heading\n\n![Cover](./cover.png)'
+    })
+
+    expect(result.ok).toBe(true)
+    expect(clipboard.write).toHaveBeenCalledWith(
+      expect.objectContaining({
+        html: expect.stringContaining('<article class="markdown-body">'),
+        text: '# Heading\n\n![Cover](./cover.png)'
+      })
+    )
+    expect(clipboard.write).toHaveBeenCalledWith(
+      expect.objectContaining({
+        html: expect.stringContaining('src="data:image/png;base64,')
+      })
+    )
   })
 })

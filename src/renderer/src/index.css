@@ -2092,6 +2092,7 @@ summary,
   border-radius: 14px;
   background: var(--ds-pre-bg);
   box-shadow: 0 12px 30px rgba(15, 23, 42, 0.045);
+  cursor: text;
 }
 
 .cm-write-md-code-lang {
