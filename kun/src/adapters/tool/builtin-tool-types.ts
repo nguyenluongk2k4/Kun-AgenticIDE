@@ -166,7 +166,7 @@ export interface BashLocalToolOperations {
     command: string,
     cwd: string,
     options: { signal: AbortSignal; timeoutSeconds: number; onData?: (data: Buffer) => void }
-  ) => Promise<{ exitCode: number | null }>
+  ) => Promise<{ exitCode: number | null; shell?: string }>
 }
 
 export interface WriteLocalToolOperations {

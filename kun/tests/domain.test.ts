@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { DEFAULT_APPROVAL_POLICY } from '../src/contracts/policy.js'
 import { createThreadRecord, touchThread, toThreadSummary } from '../src/domain/thread.js'
 import {
   appendTurnItem,
@@ -42,6 +43,7 @@ describe('domain.thread', () => {
     })
     expect(thread.status).toBe('idle')
     expect(thread.mode).toBe('agent')
+    expect(thread.approvalPolicy).toBe(DEFAULT_APPROVAL_POLICY)
   })
 
   it('touches a thread to refresh updatedAt', () => {

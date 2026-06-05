@@ -325,6 +325,7 @@ describe('Kun built-in tools', () => {
       command: 'cat cmd.txt'
     })
     expect(output.command).toBe('cat cmd.txt')
+    expect(typeof output.shell).toBe('string')
     expect(String(output.output)).toContain('from bash')
     expect(output.truncation).toBe(null)
   })

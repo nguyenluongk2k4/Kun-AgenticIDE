@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readFile, readdir, stat, writeFile } from 'node:fs/prom
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { DEFAULT_APPROVAL_POLICY } from '../shared/app-settings'
 import { DEFAULT_GUI_UPDATE_CHANNEL } from '../shared/gui-update'
 import { JsonSettingsStore } from './settings-store'
 
@@ -13,6 +14,7 @@ describe('JsonSettingsStore', () => {
     const loaded = await store.load()
 
     expect(loaded.guiUpdate.channel).toBe(DEFAULT_GUI_UPDATE_CHANNEL)
+    expect(loaded.agents.kun.approvalPolicy).toBe(DEFAULT_APPROVAL_POLICY)
   })
 
   it('creates a default write workspace with welcome.md', async () => {

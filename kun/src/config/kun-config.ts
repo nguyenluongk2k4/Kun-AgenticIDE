@@ -234,5 +234,9 @@ export function kunConfigPathForDataDir(dataDir: string | undefined): string | u
 }
 
 export function expandHomePath(path: string): string {
-  return path.startsWith('~') ? path.replace(/^~(?=$|\/)/, homedir()) : path
+  if (path === '~') return homedir()
+  if (path.startsWith('~/') || path.startsWith('~\\')) {
+    return join(homedir(), path.slice(2).replace(/\\/g, '/'))
+  }
+  return path
 }

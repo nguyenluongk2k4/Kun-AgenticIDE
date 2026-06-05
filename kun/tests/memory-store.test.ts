@@ -160,7 +160,9 @@ describe('Memory store and recall', () => {
     const h2 = makeHarness(model, { memoryStore: store })
     await bootstrapThread(h2, { workspace: '/tmp/ws', request: { prompt: 'frontend pnpm setup?' } })
     await h2.loop.runTurn(h2.threadId, h2.turnId)
-    expect(seenRequests.at(-1)?.contextInstructions).toBeUndefined()
+    const finalInstructions = seenRequests.at(-1)?.contextInstructions?.join('\n') ?? ''
+    expect(finalInstructions).not.toContain(memory.id)
+    expect(finalInstructions).toContain('Shell runtime:')
   })
 
   function createStore(overrides: Partial<MemoryCapabilityConfig> = {}) {

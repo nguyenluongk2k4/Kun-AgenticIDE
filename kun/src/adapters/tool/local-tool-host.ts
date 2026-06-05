@@ -73,8 +73,8 @@ export type LocalToolHostOptions = {
  *
  * 1. A tool with `policy: 'never'` is rejected up front.
  * 2. A tool with `policy: 'on-request' | 'suggest' | 'untrusted'`
- *    (or with no `auto` and the runtime defaulting to on-request)
- *    always asks before running.
+ *    always asks before running when the runtime approval policy
+ *    permits tool execution.
  *
  * Tools that declare a `shouldAdvertise` predicate are also gated at
  * the listing layer and the execution layer. This is how `create_plan`

@@ -21,7 +21,7 @@ import {
 import {
   detectImageMimeType,
   resolveExecutable,
-  shellConfig,
+  shellRuntimeInfo,
   spawnCapture
 } from './builtin-tool-utils.js'
 
@@ -130,7 +130,7 @@ export const defaultReadLocalToolOperations: ReadLocalToolOperations = {
 export function createLocalBashOperations(): BashLocalToolOperations {
   return {
     exec: async (command, cwd, options) => {
-      const { shell, args } = shellConfig()
+      const { shell, args, name } = shellRuntimeInfo()
       const child = spawn(shell, [...args, command], {
         cwd,
         env: process.env,
@@ -171,7 +171,7 @@ export function createLocalBashOperations(): BashLocalToolOperations {
       })
       if (options.signal.aborted) throw new Error('command aborted')
       if (timedOut) throw new Error(`command timed out after ${options.timeoutSeconds} seconds`)
-      return { exitCode }
+      return { exitCode, shell: name }
     }
   }
 }

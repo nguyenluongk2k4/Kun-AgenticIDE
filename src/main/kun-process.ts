@@ -1,7 +1,8 @@
 import { app } from 'electron'
-import { spawn, execFile, type ChildProcess } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { createServer } from 'node:net'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
@@ -69,13 +70,6 @@ const DEFAULT_KUN_MODEL_PROFILES: Record<string, Record<string, unknown>> = {
     supportsToolCalling: true,
     messageParts: ['text']
   }
-}
-
-type PortOwner = {
-  pid: number
-  command: string
-  parentPid: number | null
-  parentCommand: string | null
 }
 
 type KunLogStream = 'stdout' | 'stderr' | 'lifecycle'
@@ -170,28 +164,24 @@ function createKunChildLogCapture(pid: number | undefined): KunChildLogCapture {
   }
 }
 
-function execFileText(file: string, args: string[]): Promise<string> {
-  return new Promise((resolve, reject) => {
-    execFile(file, args, { encoding: 'utf8' }, (error, stdout) => {
-      if (error) {
-        reject(error)
-        return
-      }
-      resolve(stdout)
-    })
-  })
-}
-
 function appRoot(): string {
   return app.isPackaged
     ? app.getAppPath().replace(/app\.asar$/, 'app.asar.unpacked')
     : app.getAppPath()
 }
 
-function kunDataDir(runtime: { dataDir: string }): string {
+export function resolveKunDataDir(runtime: { dataDir: string }): string {
   const trimmed = runtime.dataDir?.trim()
-  if (trimmed) return trimmed.startsWith('~') ? trimmed.replace(/^~/, homedir()) : trimmed
+  if (trimmed) return expandHomePath(trimmed)
   return defaultKunDataDir()
+}
+
+function expandHomePath(path: string): string {
+  if (path === '~') return homedir()
+  if (path.startsWith('~/') || path.startsWith('~\\')) {
+    return join(homedir(), path.slice(2).replace(/\\/g, '/'))
+  }
+  return path
 }
 
 export function isKunChildRunning(): boolean {
@@ -213,7 +203,7 @@ export async function startKunChild(settings: AppSettingsV1): Promise<void> {
       `Kun runtime build is missing at ${resolution.args[0]}. Run \`npm run build:kun\` before starting the GUI.`
     )
   }
-  const dataDir = kunDataDir(runtime)
+  const dataDir = resolveKunDataDir(runtime)
   await syncGuiManagedKunConfig(dataDir, runtime, {
     settings,
     launch: {
@@ -569,13 +559,28 @@ export async function reclaimKunPort(
   port: number
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   if (port <= 0) return { ok: true }
-  try {
-    await execFileText('lsof', ['-ti', `:${port}`])
-    // Port has an owner; surface a soft failure so the GUI can decide.
-    return { ok: false, message: `port ${port} is in use` }
-  } catch {
-    return { ok: true }
-  }
+  const available = await canBindTcpPort(port, '127.0.0.1')
+  return available
+    ? { ok: true }
+    : { ok: false, message: `port ${port} is in use` }
+}
+
+function canBindTcpPort(port: number, host: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false
+    const server = createServer()
+    const settle = (available: boolean): void => {
+      if (settled) return
+      settled = true
+      server.removeAllListeners('error')
+      resolve(available)
+    }
+    server.unref()
+    server.once('error', () => settle(false))
+    server.listen({ port, host, exclusive: true }, () => {
+      server.close(() => settle(true))
+    })
+  })
 }
 
 async function waitForKunStartup(startedChild: ChildProcess): Promise<void> {

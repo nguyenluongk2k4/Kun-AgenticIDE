@@ -1223,8 +1223,8 @@ postmortem timing.
   `Authorization: Bearer <runtime-token>` unless the runtime
   was started with `--insecure` (local dev only). The token is
   generated and stored in settings.
-- **Approval policy** — `on-request` (default), `untrusted`,
-  `never`, `auto`, `suggest`. Per-tool policies can override.
+- **Approval policy** — `auto` (default), `on-request`,
+  `untrusted`, `never`, `suggest`. Per-tool policies can override.
 - **Sandbox mode** — `read-only` / `workspace-write` (default) /
   `danger-full-access` / `external-sandbox`. Enforced by the
   workspace inspector and the file/tool adapters.

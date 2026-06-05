@@ -7,7 +7,7 @@
     "apiKey": "",
     "baseUrl": "https://api.deepseek.com/beta",
     "model": "deepseek-v4-pro",
-    "approvalPolicy": "on-request",
+    "approvalPolicy": "auto",
     "sandboxMode": "workspace-write",
     "tokenEconomyMode": false,
     "tokenEconomy": {

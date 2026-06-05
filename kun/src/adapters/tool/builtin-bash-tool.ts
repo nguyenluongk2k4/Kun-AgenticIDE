@@ -9,7 +9,7 @@ import { createLocalBashOperations } from './builtin-tool-operations.js'
 import {
   describeKind,
   normalizePositiveInteger,
-  shellConfig,
+  shellRuntimeInfo,
   withToolBoundary,
   workspaceRoot
 } from './builtin-tool-utils.js'
@@ -24,19 +24,21 @@ async function bashExecute(
     command: string,
     cwd: string,
     options: { signal: AbortSignal; timeoutSeconds: number; onData?: (data: Buffer) => void }
-  ) => Promise<{ exitCode: number | null }>
+  ) => Promise<{ exitCode: number | null; shell?: string }>
 ): Promise<{
   output: string
   exitCode: number | null
+  shell: string
   truncated: TextSlice
   fullOutputPath?: string
 }> {
   await mkdir(cwd, { recursive: true })
+  const shellRuntime = shellRuntimeInfo()
+  let resultShell = shellRuntime.name
   const child = execOperation
     ? null
     : (() => {
-        const { shell, args } = shellConfig()
-        return spawn(shell, [...args, command], {
+        return spawn(shellRuntime.shell, [...shellRuntime.args, command], {
           cwd,
           env: process.env,
           detached: process.platform !== 'win32',
@@ -67,6 +69,7 @@ async function bashExecute(
       output: {
         command,
         cwd,
+        shell: resultShell,
         exit_code: null,
         output: snapshot.content,
         full_output_path: snapshot.fullOutputPath ?? null,
@@ -125,6 +128,7 @@ async function bashExecute(
         onData: handleData
       })
       exitCode = result.exitCode
+      resultShell = result.shell ?? resultShell
     } finally {
       settled = true
       clearTimeout(timer)
@@ -175,6 +179,7 @@ async function bashExecute(
   return {
     output: snapshot.content,
     exitCode,
+    shell: resultShell,
     truncated,
     fullOutputPath: snapshot.fullOutputPath
   }
@@ -191,9 +196,10 @@ function appendTruncationNotice(text: string, truncated: TextSlice, mode: Trunca
 
 export function createBashLocalTool(options: BashLocalToolOptions = {}): LocalTool {
   const bashOps = options.operations ?? createLocalBashOperations()
+  const shellRuntime = shellRuntimeInfo()
   return LocalToolHost.defineTool({
     name: 'bash',
-    description: 'Execute a shell command in the workspace and return the combined stdout and stderr output.',
+    description: `Execute a shell command in the workspace using the host platform shell. Current shell: ${shellRuntime.name}. Use ${shellRuntime.syntax} syntax. Return the combined stdout and stderr output.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -228,6 +234,7 @@ export function createBashLocalTool(options: BashLocalToolOptions = {}): LocalTo
             output: {
               command,
               cwd,
+              shell: result.shell,
               exit_code: result.exitCode,
               output: content,
               full_output_path: result.fullOutputPath ?? null,
@@ -249,6 +256,7 @@ export function createBashLocalTool(options: BashLocalToolOptions = {}): LocalTo
           output: {
             command,
             cwd,
+            shell: result.shell,
             exit_code: result.exitCode ?? 0,
             output: content,
             full_output_path: result.fullOutputPath ?? null,

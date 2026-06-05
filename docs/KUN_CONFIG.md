@@ -54,7 +54,7 @@ GUI 启动 Kun 时会按下面的顺序合并配置。
     "apiKey": "",
     "baseUrl": "https://api.deepseek.com/beta",
     "model": "deepseek-v4-pro",
-    "approvalPolicy": "on-request",
+    "approvalPolicy": "auto",
     "sandboxMode": "workspace-write"
   },
   "models": {
@@ -202,7 +202,7 @@ Kun 内置 DeepSeek V4 默认模型画像：
       "autoStart": true,
       "dataDir": "~/.deepseekgui/kun",
       "model": "deepseek-v4-pro",
-      "approvalPolicy": "on-request",
+      "approvalPolicy": "auto",
       "sandboxMode": "workspace-write",
       "tokenEconomyMode": false,
       "insecure": false

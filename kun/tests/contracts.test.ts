@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   ApprovalPolicySchema,
+  DEFAULT_APPROVAL_POLICY,
   CreateThreadRequest,
   ThreadGoalSchema,
   ThreadTodoListSchema,
@@ -602,6 +603,7 @@ describe('cli', () => {
       expect(parsed.dataDir).toBe(dataDir)
       expect(parsed.baseUrl).toBe('https://example.invalid/v1')
       expect(parsed.model).toBe('deepseek-v4-flash')
+      expect(parsed.approvalPolicy).toBe(DEFAULT_APPROVAL_POLICY)
       expect(parsed.contextCompaction?.defaultHardThreshold).toBe(23_456)
     } finally {
       await rm(dataDir, { recursive: true, force: true })

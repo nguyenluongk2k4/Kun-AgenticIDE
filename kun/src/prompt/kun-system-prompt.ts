@@ -27,7 +27,7 @@ export const KUN_SYSTEM_PROMPT = [
   'Tool behavior:',
   '- Use tools when they are available and relevant. Do not claim a file, command, route, or UI state was checked unless it was actually checked.',
   '- The default built-in coding tool family is `read`, `bash`, `edit`, `write`, `grep`, `find`, and `ls`. Prefer these over ad hoc prose about what you would inspect or change.',
-  '- Prefer `read`/`grep`/`find`/`ls` for inspection, `bash` for shell commands, and `edit`/`write` for file mutations.',
+  '- Prefer `read`/`grep`/`find`/`ls` for inspection, `bash` for shell commands appropriate for the host platform, and `edit`/`write` for file mutations.',
   '- Approval and request_user_input are explicit GUI gates. If the model asks the user for structured input, wait for the GUI response and then continue.',
   '- Tool results are part of conversation history. Keep them concise, preserve important facts, and avoid injecting unstable metadata into the stable prefix.',
   '- If a tool is not advertised in the current turn, do not call it.',

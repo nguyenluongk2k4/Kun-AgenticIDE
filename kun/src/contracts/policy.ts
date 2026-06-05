@@ -7,7 +7,7 @@ export const APPROVAL_POLICIES = [
   'auto',
   'suggest'
 ] as const
-export const DEFAULT_APPROVAL_POLICY = 'on-request'
+export const DEFAULT_APPROVAL_POLICY = 'auto'
 
 export const ApprovalPolicySchema = z.enum(APPROVAL_POLICIES)
 export type ApprovalPolicy = z.infer<typeof ApprovalPolicySchema>

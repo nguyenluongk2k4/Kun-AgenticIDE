@@ -65,7 +65,7 @@ Run from the `kun/` directory.
 | `--api-key` | DeepSeek-compatible API key | empty |
 | `--base-url` | DeepSeek-compatible model API base URL | `https://api.deepseek.com/beta` |
 | `--model` | Default model id | `deepseek-v4-pro` |
-| `--approval-policy` | `on-request` \| `untrusted` \| `never` \| `auto` \| `suggest` | `on-request` |
+| `--approval-policy` | `on-request` \| `untrusted` \| `never` \| `auto` \| `suggest` | `auto` |
 | `--sandbox-mode` | `read-only` \| `workspace-write` \| `danger-full-access` \| `external-sandbox` | `workspace-write` |
 | `--insecure` | Disable bearer token check (local dev only) | off |
 
@@ -145,7 +145,7 @@ Shape:
     "apiKey": "",
     "baseUrl": "https://api.deepseek.com/beta",
     "model": "deepseek-v4-pro",
-    "approvalPolicy": "on-request",
+    "approvalPolicy": "auto",
     "sandboxMode": "workspace-write",
     "storage": {
       "backend": "hybrid"

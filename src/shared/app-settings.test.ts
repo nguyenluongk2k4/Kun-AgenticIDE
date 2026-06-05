@@ -5,6 +5,7 @@ import {
   kunSettingsPatch,
   DEFAULT_KUN_DATA_DIR,
   DEFAULT_KUN_MODEL,
+  DEFAULT_APPROVAL_POLICY,
   DEFAULT_WEIXIN_BRIDGE_RPC_URL,
   DEFAULT_SCHEDULE_INTERNAL_PORT,
   buildClawRuntimePrompt,
@@ -79,6 +80,11 @@ describe('kun defaults', () => {
 
   it('defaults the assistant model to v4 pro', () => {
     expect(defaultKunRuntimeSettings().model).toBe(DEFAULT_KUN_MODEL)
+  })
+
+  it('defaults approval policy to auto', () => {
+    expect(defaultKunRuntimeSettings().approvalPolicy).toBe(DEFAULT_APPROVAL_POLICY)
+    expect(defaultKunRuntimeSettings().approvalPolicy).toBe('auto')
   })
 
   it('defaults token economy mode to off', () => {
@@ -373,6 +379,16 @@ describe('legacy Kun defaults migration', () => {
     } as unknown as Parameters<typeof migrateLegacyAppSettings>[0])
 
     expect(migrated.agents?.kun?.port).toBe(8899)
+  })
+
+  it('uses the current approval policy default for missing legacy local HTTP settings', () => {
+    const migrated = migrateLegacyAppSettings({
+      version: 1,
+      agentProvider: 'deepseek-runtime',
+      deepseek: {}
+    } as unknown as Parameters<typeof migrateLegacyAppSettings>[0])
+
+    expect(migrated.agents?.kun?.approvalPolicy).toBe(DEFAULT_APPROVAL_POLICY)
   })
 
   it('upgrades old persisted Kun defaults to the current defaults', () => {

@@ -8,6 +8,7 @@ import type {
   ToolProviderKind
 } from '../ports/tool-host.js'
 import type { ModelCapabilityMetadata } from '../contracts/capabilities.js'
+import { DEFAULT_APPROVAL_POLICY } from '../contracts/policy.js'
 import type { ThreadStore } from '../ports/thread-store.js'
 import type { SessionStore } from '../ports/session-store.js'
 import type { ApprovalGate } from '../ports/approval-gate.js'
@@ -68,6 +69,7 @@ import { repairDispatchToolArguments } from './tool-call-repair.js'
 import { CREATE_PLAN_TOOL_NAME } from '../adapters/tool/create-plan-tool.js'
 import { GET_GOAL_TOOL_NAME, UPDATE_GOAL_TOOL_NAME } from '../adapters/tool/goal-tools.js'
 import { TODO_LIST_TOOL_NAME, TODO_WRITE_TOOL_NAME } from '../adapters/tool/todo-tools.js'
+import { shellRuntimeInstruction } from '../adapters/tool/builtin-tool-utils.js'
 
 const PARALLEL_READ_ONLY_TOOL_NAMES = new Set(['read', 'grep', 'find', 'ls'])
 const MAX_PARALLEL_TOOL_CALLS = 3
@@ -114,7 +116,7 @@ type ToolCatalogDrift =
  */
 export const PLAN_MODE_INSTRUCTION = [
   'You are in Plan mode.',
-  'Investigate the task first using read-only tools and commands: prefer `read`, `grep`, `find`, `ls`, and safe read-only `bash` commands to gather the facts you need.',
+  'Investigate the task first using read-only tools and commands: prefer `read`, `grep`, `find`, `ls`, and safe read-only shell commands appropriate for the host platform via `bash` to gather the facts you need.',
   'Do NOT modify project files, apply edits, or run mutating commands in this mode.',
   'When you understand the task well enough, call the `create_plan` tool to save a complete implementation plan as Markdown.',
   'Use `operation: "draft"` for the first plan, and `operation: "refine"` when revising an existing plan; you may call `create_plan` multiple times as the plan evolves.',
@@ -588,6 +590,7 @@ export class AgentLoop {
       ...(activeTodoInstruction ? [activeTodoInstruction] : []),
       ...memoryInstructions(memories),
       ...skillResolution.instructions,
+      ...(toolSpecs.some((tool) => tool.name === 'bash') ? [shellRuntimeInstruction()] : []),
       ...(toolCatalogDriftMessage ? [toolCatalogDriftMessage] : [])
     ]
     await this.recordPipelineStage(threadId, turnId, 'input_remembered', {
@@ -1803,7 +1806,7 @@ function normalizeApprovalPolicy(
     case 'untrusted':
       return value
     default:
-      return 'on-request'
+      return DEFAULT_APPROVAL_POLICY
   }
 }
 

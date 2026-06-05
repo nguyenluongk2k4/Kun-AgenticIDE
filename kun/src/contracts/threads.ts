@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { TurnSchema } from './turns.js'
-import { ApprovalPolicySchema, SandboxModeSchema } from './policy.js'
+import { ApprovalPolicySchema, DEFAULT_APPROVAL_POLICY, SandboxModeSchema } from './policy.js'
 
 export const ThreadStatus = z.enum(['idle', 'running', 'archived', 'deleted'])
 export type ThreadStatus = z.infer<typeof ThreadStatus>
@@ -92,7 +92,7 @@ export const ThreadSchema = z.object({
   model: z.string(),
   mode: ThreadMode,
   status: ThreadStatus,
-  approvalPolicy: ApprovalPolicySchema.default('on-request'),
+  approvalPolicy: ApprovalPolicySchema.default(DEFAULT_APPROVAL_POLICY),
   sandboxMode: SandboxModeSchema.default('workspace-write'),
   costBudgetUsd: z.number().positive().optional(),
   costBudgetWarningSent: z.boolean().optional(),

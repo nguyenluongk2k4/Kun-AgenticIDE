@@ -1,5 +1,6 @@
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { createServer, type AddressInfo } from 'node:net'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { configureLogger } from './logger'
@@ -116,6 +117,47 @@ describe('startKunChild', () => {
     const logText = await readKunLog()
     expect(logText).toContain('bind failed on port 8899')
     expect(logText).toContain('exited with code 23')
+  })
+})
+
+describe('reclaimKunPort', () => {
+  it('reports a port as unavailable when another listener owns it', async () => {
+    const server = createServer()
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(0, '127.0.0.1', () => resolve())
+    })
+    try {
+      const address = server.address() as AddressInfo
+      const module = await import('./kun-process')
+
+      await expect(module.reclaimKunPort(address.port)).resolves.toEqual({
+        ok: false,
+        message: `port ${address.port} is in use`
+      })
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()))
+    }
+  })
+
+  it('allows non-positive ports so Kun can request an ephemeral port', async () => {
+    const module = await import('./kun-process')
+
+    await expect(module.reclaimKunPort(0)).resolves.toEqual({ ok: true })
+  })
+})
+
+describe('resolveKunDataDir', () => {
+  it('expands Windows-style home-relative data directories', async () => {
+    const module = await import('./kun-process')
+
+    expect(module.resolveKunDataDir({ dataDir: '~\\deepseek\\kun' })).toBe(join(homedir(), 'deepseek', 'kun'))
+  })
+
+  it('does not expand non-home tilde prefixes', async () => {
+    const module = await import('./kun-process')
+
+    expect(module.resolveKunDataDir({ dataDir: '~other\\kun' })).toBe('~other\\kun')
   })
 })
 

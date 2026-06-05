@@ -15,6 +15,22 @@ import type {
 } from './builtin-tool-types.js'
 import { COMPACT_RESOURCE_FILE_NAMES } from './builtin-tool-types.js'
 
+type SpawnSyncLike = typeof spawnSync
+
+function firstLookupResult(
+  lookup: SpawnSyncLike,
+  command: string,
+  args: string[]
+): string {
+  const result = lookup(command, args, { encoding: 'utf8' })
+  return result.status === 0
+    ? result.stdout
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .find(Boolean) ?? ''
+    : ''
+}
+
 export async function withToolBoundary(
   run: () => Promise<{ output: unknown; isError?: boolean }>
 ): Promise<{ output: unknown; isError?: boolean }> {
@@ -166,32 +182,91 @@ export function describeKind(mode: TruncateMode): string {
   return mode === 'head' ? 'first' : 'last'
 }
 
-export function shellConfig(): ShellConfig {
-  if (process.platform === 'win32') {
-    const where = spawnSync('where', ['bash.exe'], { encoding: 'utf8' })
-    const candidate = where.status === 0
-      ? where.stdout
-          .split(/\r?\n/)
-          .map((line) => line.trim())
-          .find(Boolean)
-      : null
-    if (candidate) return { shell: candidate, args: ['-lc'] }
-    return { shell: 'sh', args: ['-lc'] }
+export function shellConfig(
+  platform: NodeJS.Platform = process.platform,
+  lookup: SpawnSyncLike = spawnSync,
+  fileExists: (path: string) => boolean = existsSync
+): ShellConfig {
+  if (platform === 'win32') {
+    const bash = firstLookupResult(lookup, 'where', ['bash.exe'])
+    if (bash) return { shell: bash, args: ['-lc'] }
+    const pwsh = firstLookupResult(lookup, 'where', ['pwsh.exe'])
+    if (pwsh) {
+      return {
+        shell: pwsh,
+        args: ['-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command']
+      }
+    }
+    const powershell = firstLookupResult(lookup, 'where', ['powershell.exe'])
+    if (powershell) {
+      return {
+        shell: powershell,
+        args: ['-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command']
+      }
+    }
+    return { shell: 'cmd.exe', args: ['/d', '/s', '/c'] }
   }
-  if (existsSync('/bin/bash')) return { shell: '/bin/bash', args: ['-lc'] }
-  const which = spawnSync('which', ['bash'], { encoding: 'utf8' })
-  const candidate = which.status === 0 ? which.stdout.trim() : ''
+  if (fileExists('/bin/bash')) return { shell: '/bin/bash', args: ['-lc'] }
+  const candidate = firstLookupResult(lookup, 'which', ['bash'])
   if (candidate) return { shell: candidate, args: ['-lc'] }
   return { shell: 'sh', args: ['-lc'] }
 }
 
-export function resolveExecutable(candidates: string[]): string | null {
+export type ShellRuntimeInfo = ShellConfig & {
+  name: string
+  syntax: string
+}
+
+export function shellDisplayName(shell: string): string {
+  const name = shell.replace(/\\/g, '/').split('/').pop()?.toLowerCase() ?? shell.toLowerCase()
+  if (name === 'cmd.exe') return 'cmd.exe'
+  return name.endsWith('.exe') ? name.slice(0, -4) : name
+}
+
+export function shellRuntimeInfo(config: ShellConfig = shellConfig()): ShellRuntimeInfo {
+  const name = shellDisplayName(config.shell)
+  return {
+    ...config,
+    name,
+    syntax: shellSyntaxHint(name)
+  }
+}
+
+export function shellRuntimeInstruction(config: ShellConfig = shellConfig()): string {
+  const shell = shellRuntimeInfo(config)
+  return `Shell runtime: the \`bash\` tool executes commands with \`${shell.name}\` (${shell.shell}). Write shell commands appropriate for the host platform using ${shell.syntax} syntax. Do not assume POSIX/Bash syntax unless the current shell is Bash-compatible.`
+}
+
+function shellSyntaxHint(name: string): string {
+  switch (name) {
+    case 'bash':
+    case 'sh':
+    case 'zsh':
+      return 'POSIX shell'
+    case 'pwsh':
+    case 'powershell':
+      return 'PowerShell'
+    case 'cmd.exe':
+      return 'cmd.exe batch'
+    default:
+      return `${name} shell`
+  }
+}
+
+export function resolveExecutable(
+  candidates: string[],
+  platform: NodeJS.Platform = process.platform,
+  lookup: SpawnSyncLike = spawnSync,
+  fileExists: (path: string) => boolean = existsSync,
+  responds: (candidate: string) => boolean = executableResponds
+): string | null {
+  const lookupCommand = platform === 'win32' ? 'where' : 'which'
   for (const candidate of candidates) {
-    if (candidate.includes('/') && existsSync(candidate) && executableResponds(candidate)) return candidate
-    if (!candidate.includes('/')) {
-      const lookup = spawnSync('which', [candidate], { encoding: 'utf8' })
-      const resolved = lookup.status === 0 ? lookup.stdout.trim() : ''
-      if (resolved && executableResponds(resolved)) return resolved
+    const isExplicitPath = candidate.includes('/') || candidate.includes('\\')
+    if (isExplicitPath && fileExists(candidate) && responds(candidate)) return candidate
+    if (!isExplicitPath) {
+      const resolved = firstLookupResult(lookup, lookupCommand, [candidate])
+      if (resolved && responds(resolved)) return resolved
     }
   }
   return null
@@ -315,7 +390,7 @@ export async function listDirectoryWithOps(
 export function makeListEntry(path: string, root: string, fileStat: FsStats): ListEntry {
   return {
     path,
-    relative_path: relative(root, path) || '.',
+    relative_path: normalizeToolPath(relative(root, path) || '.'),
     name: basename(path),
     kind: fileStat.isDirectory()
       ? 'directory'
@@ -357,7 +432,7 @@ export function globToRegExp(pattern: string): RegExp {
 }
 
 export function normalizeToolPath(value: string): string {
-  return value.split(sep).join('/')
+  return value.replace(/\\/g, '/').split(sep).join('/')
 }
 
 export function parseEditInstructions(args: Record<string, unknown>): EditInstruction[] {

@@ -154,7 +154,7 @@ Renderer 只应展示 Kun。需要删除或保持删除的 UI 面包括：
       "runtimeToken": "",
       "dataDir": "~/.deepseekgui/kun",
       "model": "deepseek-v4-pro",
-      "approvalPolicy": "on-request",
+      "approvalPolicy": "auto",
       "sandboxMode": "workspace-write",
       "insecure": false
     }

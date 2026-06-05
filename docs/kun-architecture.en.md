@@ -162,7 +162,7 @@ Saved settings should now be just:
       "runtimeToken": "",
       "dataDir": "~/.deepseekgui/kun",
       "model": "deepseek-v4-pro",
-      "approvalPolicy": "on-request",
+      "approvalPolicy": "auto",
       "sandboxMode": "workspace-write",
       "insecure": false
     }

@@ -68,7 +68,7 @@ function legacyLocalHttpRuntimeDefaults(port = 7878): LegacyLocalHttpRuntimeSett
     baseUrl: DEFAULT_DEEPSEEK_BASE_URL,
     runtimeToken: '',
     extraCorsOrigins: ['http://localhost:5173', 'http://127.0.0.1:5173'],
-    approvalPolicy: 'auto',
+    approvalPolicy: DEFAULT_APPROVAL_POLICY,
     sandboxMode: 'workspace-write'
   }
 }
