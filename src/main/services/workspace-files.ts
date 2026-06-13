@@ -11,6 +11,7 @@ import {
   writeFile
 } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
+import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import type {
   WorkspaceClipboardImageSavePayload,
@@ -52,6 +53,7 @@ const MAX_FILE_PREVIEW_BYTES = 1_500_000
 const MAX_IMAGE_PREVIEW_BYTES = 12 * 1024 * 1024
 const MAX_PDF_PREVIEW_BYTES = 64 * 1024 * 1024
 const WORKSPACE_IMAGE_DIR = 'img'
+const CLIPBOARD_TEMP_DIR = join(tmpdir(), 'kun')
 
 const WORKSPACE_IMAGE_MIME_BY_EXT = new Map([
   ['.png', 'image/png'],
@@ -267,6 +269,10 @@ function buildWorkspaceImageName(now = new Date()): string {
   return `pasted-image-${iso}-${randomUUID().slice(0, 8)}.png`
 }
 
+function buildClipboardTempImagePath(now = new Date()): string {
+  return join(CLIPBOARD_TEMP_DIR, `${now.getTime()}.png`)
+}
+
 export async function readClipboardImage(): Promise<ClipboardImageReadResult> {
   try {
     const image = clipboard.readImage()
@@ -279,10 +285,15 @@ export async function readClipboardImage(): Promise<ClipboardImageReadResult> {
       return { ok: false, message: 'Clipboard image could not be encoded as PNG.' }
     }
 
+    const localFilePath = buildClipboardTempImagePath()
+    await mkdir(CLIPBOARD_TEMP_DIR, { recursive: true })
+    await writeFile(localFilePath, buffer)
+
     const size = image.getSize()
     return {
       ok: true,
       name: buildWorkspaceImageName(),
+      localFilePath,
       mimeType: 'image/png',
       dataBase64: buffer.toString('base64'),
       byteSize: buffer.length,

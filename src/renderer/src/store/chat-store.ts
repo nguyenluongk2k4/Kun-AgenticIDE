@@ -57,7 +57,6 @@ import {
   collectAssistantTextForTurn,
   findLatestUserBlockId,
   findReusableEmptyThreadId,
-  hasPendingRuntimeWork,
   threadBelongsToWorkspace
 } from './chat-store-runtime-helpers'
 import {

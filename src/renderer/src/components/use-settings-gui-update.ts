@@ -14,7 +14,7 @@ export function useSettingsGuiUpdate({
   form,
   t
 }: {
-  category: 'general' | 'providers' | 'write' | 'imageGeneration' | 'mediaGeneration' | 'speechToText' | 'agents' | 'permissions' | 'shortcuts' | 'easterEgg' | 'claw'
+  category: 'general' | 'providers' | 'write' | 'imageGeneration' | 'mediaGeneration' | 'speechToText' | 'agents' | 'permissions' | 'shortcuts' | 'easterEgg' | 'claw' | 'updates'
   channel: GuiUpdateChannel | undefined
   form: AppSettingsV1 | null
   t: (key: string, values?: Record<string, unknown>) => string
@@ -148,7 +148,7 @@ export function useSettingsGuiUpdate({
   }, [applyGuiUpdateState])
 
   useEffect(() => {
-    if (!form || category !== 'general') return
+    if (!form || category !== 'updates') return
     if (checkedGuiUpdateChannel.current === (channel ?? null)) return
     checkedGuiUpdateChannel.current = channel ?? null
     void checkGuiUpdate()

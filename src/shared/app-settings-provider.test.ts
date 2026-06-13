@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  DEFAULT_DEEPSEEK_BASE_URL,
   defaultClawSettings,
   defaultKeyboardShortcuts,
   defaultKunRuntimeSettings,
@@ -22,8 +23,10 @@ import {
   listVideoGenerationProviderProfiles,
   listModelProviderModelIds,
   modelSupportsImageInput,
+  normalizeModelProviderSettings,
   resolveKunImageGenerationSettings,
   resolveKunMusicGenerationSettings,
+  resolveModelProviderBaseUrl,
   resolveKunRuntimeSettings,
   resolveKunSpeechToTextSettings,
   resolveKunTextToSpeechSettings,
@@ -839,5 +842,44 @@ describe('model provider settings', () => {
       model: 'whisper-1',
       language: 'zh'
     }))
+  })
+
+  it('preserves a cleared default base URL while resolving the official runtime endpoint', () => {
+    const state = settings()
+    const normalized = normalizeModelProviderSettings({
+      ...state.provider,
+      baseUrl: '',
+      providers: state.provider.providers.map((provider) =>
+        provider.id === 'deepseek'
+          ? { ...provider, baseUrl: '' }
+          : provider
+      )
+    })
+
+    expect(normalized.baseUrl).toBe('')
+    expect(normalized.providers.find((provider) => provider.id === 'deepseek')?.baseUrl).toBe('')
+    expect(resolveModelProviderBaseUrl({ ...state, provider: normalized })).toBe(DEFAULT_DEEPSEEK_BASE_URL)
+  })
+
+  it('keeps deprecated DeepSeek models out of the default provider list', () => {
+    const defaultModels = defaultModelProviderSettings().providers[0].models
+
+    expect(defaultModels).toEqual(['deepseek-v4-pro', 'deepseek-v4-flash'])
+    expect(defaultModels).not.toContain('deepseek-chat')
+    expect(defaultModels).not.toContain('deepseek-reasoner')
+  })
+})
+
+describe('provider presets', () => {
+  it('includes a LiteLLM preset', () => {
+    const litellm = getModelProviderPreset('litellm')
+    expect(litellm).not.toBeNull()
+    expect(litellm && modelProviderPresetProfile(litellm)).toMatchObject({
+      id: 'litellm',
+      name: 'LiteLLM',
+      baseUrl: 'http://localhost:4000',
+      endpointFormat: 'chat_completions',
+      models: []
+    })
   })
 })

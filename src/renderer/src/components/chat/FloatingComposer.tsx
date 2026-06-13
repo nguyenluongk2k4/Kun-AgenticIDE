@@ -55,15 +55,17 @@ import {
   COMPACT_COMMAND_ALIASES,
   getGoalPanelDraftObjective,
   getSlashQuery,
+  NEW_COMMAND_ALIASES,
   parseBtwCommand,
   parseCompactCommand,
   parseGoalCommand,
+  parseNewCommand,
   parseReviewCommand,
   REVIEW_COMMAND_ALIASES,
   type SlashCommand,
   type SlashCommandId
 } from './floating-composer-commands'
-export { parseBtwCommand, parseCompactCommand, parseGoalCommand, parseReviewCommand } from './floating-composer-commands'
+export { parseBtwCommand, parseCompactCommand, parseGoalCommand, parseNewCommand, parseReviewCommand } from './floating-composer-commands'
 import {
   formatCompactNumber,
   formatCost,
@@ -143,6 +145,7 @@ type Props = {
   onSend: () => void
   onInterrupt: (options?: { discard?: boolean }) => void
   onPlanCommand?: () => void
+  onNewCommand?: () => void
   onReviewCommand?: (target: ReviewTarget) => void
   onExecutionSettingsChange?: (patch: Partial<ComposerExecutionSettings>) => void
   onOpenChanges?: () => void
@@ -497,6 +500,10 @@ export function handleComposerImagePaste({
   const hasImageTransfer = imageTransferHasImages(clipboardData)
   if (files.length > 0) {
     preventDefault()
+    if (onPasteClipboardImage) {
+      void onPasteClipboardImage({ silentNoImage: false })
+      return true
+    }
     onPickAttachments?.(files)
     return true
   }
@@ -523,6 +530,22 @@ export function formatGoalElapsedSeconds(seconds: number): string {
   return remainingMinutes === 0
     ? `${hours}h`
     : `${hours}h ${remainingMinutes}m`
+}
+
+export function shouldShowGoalFloater({
+  compact,
+  hasActiveGoal,
+  slashQuery,
+  goalPanelOpen,
+  composerMenuOpen
+}: {
+  compact: boolean
+  hasActiveGoal: boolean
+  slashQuery: string | null
+  goalPanelOpen: boolean
+  composerMenuOpen: boolean
+}): boolean {
+  return !compact && hasActiveGoal && slashQuery == null && !goalPanelOpen && !composerMenuOpen
 }
 
 export function FloatingComposer({
@@ -564,6 +587,7 @@ export function FloatingComposer({
   onSend,
   onInterrupt,
   onPlanCommand,
+  onNewCommand,
   onReviewCommand,
   onExecutionSettingsChange,
   onOpenChanges,
@@ -660,9 +684,11 @@ export function FloatingComposer({
   const showIntentToolbar = !compact && route === 'chat'
   const showComposerMenuButton = showIntentToolbar
   const canTogglePlanMode = canCompose && Boolean(onPlanCommand)
+  const canCreateNewThread = runtimeReady && route !== 'claw' && Boolean(effectiveWorkspaceRoot) && Boolean(onNewCommand)
   const canOpenGoalPanel = canCompose && route !== 'claw'
   const canRunReview = canCompose && route !== 'claw' && Boolean(onReviewCommand)
-  const canOpenComposerMenu = showComposerMenuButton && (canTogglePlanMode || canOpenGoalPanel || canRunReview)
+  const canOpenComposerMenu = showComposerMenuButton
+    && (canTogglePlanMode || canCreateNewThread || canOpenGoalPanel || canRunReview)
   const showToolbarStartControls = showComposerMenuButton
   const showChangeSummary = !compact && route === 'chat' && changedFiles.length > 0
   const effectiveChangedFileStats = changedFileStats ?? changedFiles.reduce(
@@ -722,6 +748,16 @@ export function FloatingComposer({
     const threadActionDisabled = !runtimeReady || busy || !activeThreadId
     const goalActionDisabled = !canOpenGoalPanel
     const commands: SlashCommand[] = []
+    if (route !== 'claw') {
+      commands.push({
+        id: 'new',
+        title: t('slashCommandNewTitle'),
+        description: t('slashCommandNewDescription'),
+        keywords: ['create', 'new', 'thread', 'chat', '会话', '新建', ...NEW_COMMAND_ALIASES],
+        icon: <Plus className="h-4 w-4" strokeWidth={1.9} />,
+        disabled: !canCreateNewThread
+      })
+    }
     if (onPlanCommand) {
       commands.push({
         id: 'plan',
@@ -850,6 +886,7 @@ export function FloatingComposer({
     effectiveWorkspaceRoot,
     hideBtwCommand,
     onBtwCommand,
+    canCreateNewThread,
     onPlanCommand,
     onReviewCommand,
     route,
@@ -922,6 +959,13 @@ export function FloatingComposer({
       : t(`goalStatusShort.${activeThreadGoal.status}`)
     : ''
   const goalMenuChecked = activeThreadGoal?.status === 'active'
+  const showGoalFloater = shouldShowGoalFloater({
+    compact,
+    hasActiveGoal: Boolean(activeThreadGoal),
+    slashQuery,
+    goalPanelOpen,
+    composerMenuOpen
+  })
 
   useEffect(() => {
     setSelectedCommandIndex(0)
@@ -1026,6 +1070,12 @@ export function FloatingComposer({
       setInput('')
       setMode('plan')
       onPlanCommand?.()
+      draft.focusComposer()
+      return
+    }
+    if (commandId === 'new' && onNewCommand) {
+      setInput('')
+      onNewCommand()
       draft.focusComposer()
       return
     }
@@ -1190,6 +1240,14 @@ export function FloatingComposer({
       return
     }
     if (runGoalCommand(parsedGoalCommand)) {
+      return
+    }
+    if (onNewCommand && parseNewCommand(input)) {
+      const command = slashCommands.find((item) => item.id === 'new')
+      if (command?.disabled) return
+      setInput('')
+      onNewCommand()
+      draft.focusComposer()
       return
     }
     const compactCommand = parseCompactCommand(input)
@@ -1406,7 +1464,7 @@ export function FloatingComposer({
       />
 
       <div className="relative">
-        {!compact && activeThreadGoal && slashQuery == null && !goalPanelOpen && !composerMenuOpen ? (
+        {showGoalFloater && activeThreadGoal ? (
           <div className="pointer-events-none absolute inset-x-3 bottom-full z-20 mb-2 flex justify-center">
             <div className="pointer-events-auto flex min-h-11 w-full max-w-[46rem] items-center gap-2 rounded-full border border-ds-border bg-ds-card/95 px-3 py-1.5 text-ds-muted shadow-[0_12px_34px_rgba(20,47,95,0.10)] backdrop-blur-xl dark:bg-ds-card/90">
               <Target className="h-3.5 w-3.5 shrink-0 text-ds-faint" strokeWidth={1.9} />

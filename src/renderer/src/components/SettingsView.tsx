@@ -56,10 +56,11 @@ import {
   MediaGenerationSettingsSection,
   ProvidersSettingsSection,
   SpeechToTextSettingsSection,
+  UpdatesSettingsSection,
   WriteSettingsSection
 } from './settings-sections'
 
-type SettingsCategory = 'general' | 'providers' | 'write' | 'imageGeneration' | 'mediaGeneration' | 'speechToText' | 'agents' | 'permissions' | 'shortcuts' | 'easterEgg' | 'claw'
+type SettingsCategory = 'general' | 'providers' | 'write' | 'imageGeneration' | 'mediaGeneration' | 'speechToText' | 'agents' | 'permissions' | 'shortcuts' | 'easterEgg' | 'claw' | 'updates'
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
 type SettingsPatch = AppSettingsPatch
 type SkillRootOption = {
@@ -264,6 +265,10 @@ export function SettingsView(): ReactElement {
       setCategory('easterEgg')
       return
     }
+    if (settingsSection === 'updates') {
+      setCategory('updates')
+      return
+    }
     setCategory('agents')
   }, [settingsSection])
 
@@ -279,12 +284,13 @@ export function SettingsView(): ReactElement {
       settingsSection === 'claw' ||
       settingsSection === 'shortcuts' ||
       settingsSection === 'easterEgg' ||
+      settingsSection === 'updates' ||
       (category !== 'agents' && category !== 'permissions')
     ) {
       return
     }
     const refs: Record<
-      Exclude<SettingsRouteSection, 'general' | 'providers' | 'write' | 'imageGeneration' | 'mediaGeneration' | 'speechToText' | 'claw' | 'shortcuts' | 'easterEgg'>,
+      Exclude<SettingsRouteSection, 'general' | 'providers' | 'write' | 'imageGeneration' | 'mediaGeneration' | 'speechToText' | 'claw' | 'shortcuts' | 'easterEgg' | 'updates'>,
       HTMLDivElement | null
     > = {
       agents: agentsSectionRef.current,
@@ -909,6 +915,7 @@ export function SettingsView(): ReactElement {
           {category === 'shortcuts' ? <KeyboardShortcutsSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'easterEgg' ? <EasterEggSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'claw' ? <ClawSettingsSection ctx={settingsSectionContext} /> : null}
+          {category === 'updates' ? <UpdatesSettingsSection ctx={settingsSectionContext} /> : null}
         </div>
       </div>
       {writeDebugModalOpen ? (

@@ -87,6 +87,7 @@ export type SettingsRouteSection =
   | 'shortcuts'
   | 'easterEgg'
   | 'claw'
+  | 'updates'
 export type AppRoute = 'chat' | 'write' | 'settings' | 'plugins' | 'claw' | 'schedule'
 export type PluginHostRoute = 'chat' | 'claw'
 

@@ -15,7 +15,7 @@ import type {
   VideoGenerationProtocol
 } from './app-settings-types'
 
-export type ModelProviderPresetId = 'xiaomi' | 'minimax'
+export type ModelProviderPresetId = 'litellm' | 'xiaomi' | 'minimax'
 
 export const TOKEN_PLAN_PROVIDER_ID_SUFFIX = '-token-plan'
 
@@ -127,6 +127,15 @@ const MINIMAX_BUILT_IN_REASONING: ModelProviderReasoningCapabilityV1 = {
 }
 
 export const MODEL_PROVIDER_PRESETS: ModelProviderPreset[] = [
+  {
+    id: 'litellm',
+    name: 'LiteLLM',
+    baseUrl: 'http://localhost:4000',
+    endpointFormat: 'chat_completions',
+    models: [],
+    docsUrl: 'https://docs.litellm.ai/docs/',
+    apiKeyUrl: 'https://docs.litellm.ai/docs/proxy/quick_start'
+  },
   {
     id: 'xiaomi',
     name: 'Xiaomi',

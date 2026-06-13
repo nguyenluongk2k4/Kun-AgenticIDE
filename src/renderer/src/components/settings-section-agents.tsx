@@ -14,7 +14,7 @@ import {
   DEFAULT_KUN_DATA_DIR,
   WRITE_INLINE_COMPLETION_MODEL_IDS,
   defaultModelProviderSettings,
-  isKunRuntimeInsecure,
+  isKunRuntimeInsecure
 } from '@shared/app-settings'
 import type { GuiUpdateChannel } from '@shared/gui-update'
 import type { SkillRootId } from '../lib/skill-root-preference'

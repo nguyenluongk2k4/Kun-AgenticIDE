@@ -1,7 +1,7 @@
 import type { Dispatch, ReactElement, SetStateAction } from 'react'
-import { AudioLines, Bot, ChevronLeft, Globe, ImageIcon, Keyboard, Mic, PencilLine, ServerCog, Settings, ShieldCheck, Smartphone, Sparkles } from 'lucide-react'
+import { AudioLines, Bot, ChevronLeft, Globe, ImageIcon, Keyboard, Mic, PencilLine, RefreshCw, ServerCog, Settings, ShieldCheck, Smartphone, Sparkles } from 'lucide-react'
 
-type SettingsCategory = 'general' | 'providers' | 'write' | 'imageGeneration' | 'mediaGeneration' | 'speechToText' | 'agents' | 'permissions' | 'shortcuts' | 'easterEgg' | 'claw'
+type SettingsCategory = 'general' | 'providers' | 'write' | 'imageGeneration' | 'mediaGeneration' | 'speechToText' | 'agents' | 'permissions' | 'shortcuts' | 'easterEgg' | 'claw' | 'updates'
 
 export function SettingsSidebar({
   category,
@@ -86,6 +86,10 @@ export function SettingsSidebar({
         <button type="button" className={catCls('easterEgg')} onClick={() => setCategory('easterEgg')}>
           <Sparkles className="h-4 w-4 shrink-0 opacity-70" strokeWidth={1.75} />
           {t('easterEgg')}
+        </button>
+        <button type="button" className={catCls('updates')} onClick={() => setCategory('updates')}>
+          <RefreshCw className="h-4 w-4 shrink-0 opacity-70" strokeWidth={1.75} />
+          {t('updates')}
         </button>
         <button type="button" className={catCls('claw')} onClick={() => setCategory('claw')}>
           <Smartphone className="h-4 w-4 shrink-0 opacity-70" strokeWidth={1.75} />

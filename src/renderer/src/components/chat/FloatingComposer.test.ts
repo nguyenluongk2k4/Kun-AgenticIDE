@@ -9,7 +9,9 @@ import {
   imageTransferHasImages,
   parseCompactCommand,
   parseGoalCommand,
-  parseReviewCommand
+  parseNewCommand,
+  parseReviewCommand,
+  shouldShowGoalFloater
 } from './FloatingComposer'
 import {
   FloatingComposerModelPicker,
@@ -64,6 +66,14 @@ describe('FloatingComposer slash commands', () => {
     expect(parseGoalCommand('/goalkeeper')).toBe(false)
   })
 
+  it('parses new session command aliases', () => {
+    expect(parseNewCommand('/new')).toBe(true)
+    expect(parseNewCommand('/new-thread')).toBe(true)
+    expect(parseNewCommand('/新建会话')).toBe(true)
+    expect(parseNewCommand('/new current task')).toBe(false)
+    expect(parseNewCommand('/new-topic')).toBe(false)
+  })
+
   it('parses review command targets', () => {
     expect(parseReviewCommand('/review')).toEqual({ kind: 'uncommittedChanges' })
     expect(parseReviewCommand('/review base main')).toEqual({ kind: 'baseBranch', branch: 'main' })
@@ -91,6 +101,48 @@ describe('FloatingComposer goal helpers', () => {
     expect(formatGoalElapsedSeconds(60)).toBe('1m')
     expect(formatGoalElapsedSeconds(125)).toBe('2m 5s')
     expect(formatGoalElapsedSeconds(3720)).toBe('1h 2m')
+  })
+
+  it('shows the goal banner only when no other composer overlay is active', () => {
+    expect(shouldShowGoalFloater({
+      compact: false,
+      hasActiveGoal: true,
+      slashQuery: null,
+      goalPanelOpen: false,
+      composerMenuOpen: false
+    })).toBe(true)
+
+    expect(shouldShowGoalFloater({
+      compact: true,
+      hasActiveGoal: true,
+      slashQuery: null,
+      goalPanelOpen: false,
+      composerMenuOpen: false
+    })).toBe(false)
+
+    expect(shouldShowGoalFloater({
+      compact: false,
+      hasActiveGoal: true,
+      slashQuery: 'goal',
+      goalPanelOpen: false,
+      composerMenuOpen: false
+    })).toBe(false)
+
+    expect(shouldShowGoalFloater({
+      compact: false,
+      hasActiveGoal: true,
+      slashQuery: null,
+      goalPanelOpen: true,
+      composerMenuOpen: false
+    })).toBe(false)
+
+    expect(shouldShowGoalFloater({
+      compact: false,
+      hasActiveGoal: false,
+      slashQuery: null,
+      goalPanelOpen: false,
+      composerMenuOpen: false
+    })).toBe(false)
   })
 })
 
@@ -344,7 +396,7 @@ describe('FloatingComposer image transfer helpers', () => {
     expect(imageTransferHasImages(source)).toBe(true)
   })
 
-  it('handles pasted image files through the attachment picker', () => {
+  it('routes pasted image files through the clipboard bridge when available', () => {
     const screenshot = new File([new Uint8Array([1])], 'shot.png', { type: 'image/png' })
     const preventDefault = vi.fn()
     const onPickAttachments = vi.fn()
@@ -365,8 +417,30 @@ describe('FloatingComposer image transfer helpers', () => {
 
     expect(handled).toBe(true)
     expect(preventDefault).toHaveBeenCalledTimes(1)
+    expect(onPickAttachments).not.toHaveBeenCalled()
+    expect(onPasteClipboardImage).toHaveBeenCalledWith({ silentNoImage: false })
+  })
+
+  it('still uses the attachment picker for pasted image files when the clipboard bridge is unavailable', () => {
+    const screenshot = new File([new Uint8Array([1])], 'shot.png', { type: 'image/png' })
+    const preventDefault = vi.fn()
+    const onPickAttachments = vi.fn()
+    const handled = handleComposerImagePaste({
+      canPickAttachment: true,
+      clipboardData: {
+        getData: () => '',
+        items: {
+          length: 1,
+          0: { kind: 'file', type: 'image/png', getAsFile: () => screenshot }
+        }
+      },
+      preventDefault,
+      onPickAttachments
+    })
+
+    expect(handled).toBe(true)
+    expect(preventDefault).toHaveBeenCalledTimes(1)
     expect(onPickAttachments).toHaveBeenCalledWith([screenshot])
-    expect(onPasteClipboardImage).not.toHaveBeenCalled()
   })
 
   it('does not intercept ordinary text paste', () => {
@@ -438,6 +512,42 @@ describe('FloatingComposer capability controls', () => {
     const goalButton = html.match(/<button[^>]*>[\s\S]*?\/goal[\s\S]*?<\/button>/)?.[0] ?? ''
     expect(goalButton).toContain('/goal')
     expect(goalButton).not.toContain('disabled=""')
+  })
+
+  it('enables new session before a thread exists when a workspace is available', () => {
+    useChatStore.setState({
+      activeThreadId: null,
+      activeThreadGoal: null,
+      route: 'chat',
+      workspaceRoot: ''
+    })
+
+    const html = renderToStaticMarkup(
+      createElement(FloatingComposer, {
+        input: '/new',
+        setInput: () => undefined,
+        mode: 'agent',
+        setMode: () => undefined,
+        busy: false,
+        runtimeReady: true,
+        hasActiveThread: false,
+        workspaceRootOverride: '/workspace/deepseek-gui',
+        composerModel: '',
+        composerPickList: [],
+        onComposerModelChange: () => undefined,
+        queuedMessages: [],
+        onRemoveQueuedMessage: () => undefined,
+        onSend: () => undefined,
+        onInterrupt: () => undefined,
+        onNewCommand: () => undefined,
+        attachmentUploadEnabled: false,
+        webAccessAvailable: false
+      })
+    )
+
+    const newButton = html.match(/<button[^>]*>[\s\S]*?\/new[\s\S]*?<\/button>/)?.[0] ?? ''
+    expect(newButton).toContain('/new')
+    expect(newButton).not.toContain('disabled=""')
   })
 
   it('enables plan mode before a thread exists when a workspace is available', () => {

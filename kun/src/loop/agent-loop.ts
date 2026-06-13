@@ -221,6 +221,18 @@ function goalContinuationInstruction(goal: ThreadGoal | undefined): string | nul
 
 const GOAL_NO_TOOL_REPEAT_SIMILARITY = 0.85
 const GOAL_NO_TOOL_REPEAT_MIN_LENGTH = 12
+const GOAL_NO_TOOL_REPEAT_MAX_RECOVERY_STEPS = 3
+
+function goalNoToolRecoveryInstruction(recoveryStep: number): string {
+  return [
+    'Goal continuation recovery:',
+    `- The active goal continuation has produced near-identical no-tool replies ${recoveryStep} time(s).`,
+    '- Do not repeat the same status update, promise, or summary again.',
+    `- If the objective is actually achieved, call ${UPDATE_GOAL_TOOL_NAME} with status "complete" after verifying the current state.`,
+    `- If the strict blocked audit is satisfied, call ${UPDATE_GOAL_TOOL_NAME} with status "blocked".`,
+    '- Otherwise, continue with new substantive work or call an available tool to make concrete progress.'
+  ].join('\n')
+}
 
 /**
  * Goal continuation re-prompts the model whenever it stops without tool
@@ -404,6 +416,7 @@ export class AgentLoop {
   private readonly toolStormBreakers = new Map<string, ToolStormBreaker>()
   private readonly toolCatalogSnapshots = new Map<string, ToolCatalogSnapshot>()
   private readonly lastNoToolTextByTurn = new Map<string, string>()
+  private readonly goalNoToolRecoveryStepsByTurn = new Map<string, number>()
   private readonly turnFailures = new Map<string, TurnFailure>()
 
   constructor(opts: AgentLoopOptions) {
@@ -472,6 +485,7 @@ export class AgentLoop {
       this.autoModelRoutes.delete(autoModelRouteKey(threadId, turnId))
       this.toolStormBreakers.delete(turnId)
       this.lastNoToolTextByTurn.delete(turnId)
+      this.goalNoToolRecoveryStepsByTurn.delete(turnId)
       this.turnFailures.delete(turnId)
     }
   }
@@ -700,6 +714,9 @@ export class AgentLoop {
     const activeGoalInstruction = planTurnActive
       ? null
       : goalContinuationInstruction(thread?.goal)
+    const goalRecoveryInstruction = activeGoalInstruction
+      ? goalNoToolRecoveryInstruction(this.goalNoToolRecoveryStepsByTurn.get(turnId) ?? 0)
+      : null
     const activeTodoInstruction = planTurnActive
       ? null
       : todoContinuationInstruction(thread?.todos)
@@ -795,6 +812,9 @@ export class AgentLoop {
     })
     const contextInstructions = [
       ...(activeGoalInstruction ? [activeGoalInstruction] : []),
+      ...(goalRecoveryInstruction && (this.goalNoToolRecoveryStepsByTurn.get(turnId) ?? 0) > 0
+        ? [goalRecoveryInstruction]
+        : []),
       ...(activeTodoInstruction ? [activeTodoInstruction] : []),
       ...memoryInstructions(memories),
       ...skillResolution.instructions,
@@ -1110,8 +1130,14 @@ export class AgentLoop {
       if (stopReason === 'stop' && activeGoalInstruction) {
         const previousText = this.lastNoToolTextByTurn.get(turnId)
         if (isRepeatedNoToolAssistantText(previousText, textAccumulator.value)) {
+          const recoverySteps = (this.goalNoToolRecoveryStepsByTurn.get(turnId) ?? 0) + 1
+          if (recoverySteps <= GOAL_NO_TOOL_REPEAT_MAX_RECOVERY_STEPS) {
+            this.goalNoToolRecoveryStepsByTurn.set(turnId, recoverySteps)
+            this.lastNoToolTextByTurn.set(turnId, textAccumulator.value)
+            return 'continue'
+          }
           const message =
-            'Goal continuation stopped: the model repeated a near-identical reply twice in a row without calling any tool.'
+            'Goal continuation stopped: the model kept repeating near-identical replies without calling tools or updating the goal.'
           await this.opts.turns.applyItem(
             threadId,
             makeErrorItem({
@@ -1132,8 +1158,10 @@ export class AgentLoop {
             severity: 'warning'
           })
           this.lastNoToolTextByTurn.delete(turnId)
+          this.goalNoToolRecoveryStepsByTurn.delete(turnId)
           return 'stop'
         }
+        this.goalNoToolRecoveryStepsByTurn.delete(turnId)
         this.lastNoToolTextByTurn.set(turnId, textAccumulator.value)
         return 'continue'
       }
@@ -1142,6 +1170,7 @@ export class AgentLoop {
     // Tool calls mean the turn is making progress again; reset the no-tool
     // repetition window so unrelated later status texts are not compared.
     this.lastNoToolTextByTurn.delete(turnId)
+    this.goalNoToolRecoveryStepsByTurn.delete(turnId)
     const dispatched = await this.dispatchToolCalls({
       calls: completedToolCalls,
       threadId,
@@ -2106,6 +2135,7 @@ function buildTextAttachmentFallback(
       byteSize: fallback.byteSize,
       ...(fallback.width ? { width: fallback.width } : {}),
       ...(fallback.height ? { height: fallback.height } : {}),
+      ...(attachment.localFilePath ? { localFilePath: attachment.localFilePath } : {}),
       ...(fallback.wasCompressed !== undefined ? { wasCompressed: fallback.wasCompressed } : {})
     }
   }
@@ -2124,6 +2154,7 @@ function buildTextAttachmentFallback(
     byteSize: attachment.byteSize,
     ...(attachment.width ? { width: attachment.width } : {}),
     ...(attachment.height ? { height: attachment.height } : {}),
+    ...(attachment.localFilePath ? { localFilePath: attachment.localFilePath } : {}),
     wasCompressed: false
   }
 }
@@ -2233,14 +2264,31 @@ function buildModelCompactionPrompt(input: {
     Math.max(1_024, input.maxBytes)
   )
   return [
-    'Summarize the following Kun conversation history for a context fold.',
-    'Preserve user goals, requirements, decisions, files touched, tool outcomes, errors, constraints, active/pinned skills, and unresolved next steps.',
-    'Do not invent facts. Do not include generic advice. Prefer concise bullets grouped by topic.',
+    'You are compacting a long agent conversation so work can continue past the context window.',
+    'Write a dense, factual handoff summary using EXACTLY the following section headers, in this order.',
+    'Keep every section; write "- (none)" when a section has no content. Use short bullets, not prose.',
+    'Do not invent facts, do not add generic advice, and preserve concrete identifiers verbatim',
+    '(file paths, function/variable names, commands, URLs, IDs, error messages).',
     '',
-    'Existing heuristic summary to cross-check:',
+    '## Goal',
+    "- The user's overall objective and any explicit requirements or constraints.",
+    '## Completed',
+    '- Work already done and decisions made, with the concrete outcome of each.',
+    '## Key findings',
+    '- Important facts discovered (root causes, data values, API shapes) needed to continue.',
+    '## Files & locations',
+    '- Files created/edited/inspected and the relevant paths or line ranges.',
+    '## Tool & command results',
+    '- Notable tool/command outcomes, especially errors and their resolution status.',
+    '## Pending',
+    '- Unresolved next steps and anything explicitly requested but not yet done.',
+    '## Constraints & pins',
+    '- Durable rules, user preferences, and active/pinned skills that must survive.',
+    '',
+    'Existing heuristic summary to cross-check (may be incomplete):',
     input.heuristicSummary.trim() || '(none)',
     '',
-    'History excerpt to fold:',
+    'Conversation history to fold:',
     transcript || '(empty)'
   ].join('\n')
 }

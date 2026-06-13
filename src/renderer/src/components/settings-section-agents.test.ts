@@ -45,6 +45,7 @@ const labels: Record<string, string> = {
   modelProviderApiKey: 'Provider API key',
   modelProviderBaseUrl: 'Provider base URL',
   modelProviderEndpointFormat: 'Endpoint format',
+  modelProviderFetchEmpty: 'No models found',
   modelEndpointChatCompletions: '/v1/chat/completions',
   modelEndpointResponses: '/v1/responses',
   modelEndpointMessages: '/v1/messages',
@@ -640,5 +641,15 @@ describe('AgentsSettingsSection Kun diagnostics smoke', () => {
     expect(html).not.toContain('DeepSeek auth')
     expect(html).not.toContain('Base URL are stored in this file')
     expect(html).not.toContain('config.toml')
+  })
+
+  it('defines the LiteLLM provider preset for the Providers menu', () => {
+    const litellm = getModelProviderPreset('litellm')
+    expect(litellm && modelProviderPresetProfile(litellm)).toMatchObject({
+      id: 'litellm',
+      name: 'LiteLLM',
+      baseUrl: 'http://localhost:4000',
+      endpointFormat: 'chat_completions'
+    })
   })
 })
