@@ -25,6 +25,7 @@ type EditorCandidate = {
   commonCommandPaths?: string[]
   macAppName?: string
   macAppPaths?: string[]
+  macAppPathResolver?: () => Promise<string | undefined>
   winAppPaths?: string[]
   lineStyle?: EditorLineStyle
   alwaysAvailable?: boolean
@@ -41,7 +42,7 @@ type ResolvedEditor = EditorInfo & {
 }
 
 const DEFAULT_EDITOR_ID = 'system'
-const EDITOR_ICON_PX = 18
+const EDITOR_ICON_SOURCE_PX = 64
 
 const EDITOR_CANDIDATES: EditorCandidate[] = [
   {
@@ -150,6 +151,7 @@ const EDITOR_CANDIDATES: EditorCandidate[] = [
     commonCommandPaths: ['/usr/bin/xed'],
     macAppName: 'Xcode',
     macAppPaths: ['/Applications/Xcode.app', join(homedir(), 'Applications/Xcode.app')],
+    macAppPathResolver: resolveXcodeAppPath,
     lineStyle: 'xcode',
     platforms: ['darwin']
   },
@@ -250,6 +252,23 @@ async function findFirstExistingPath(paths: string[] = []): Promise<string | und
   return undefined
 }
 
+async function resolveXcodeAppPath(): Promise<string | undefined> {
+  if (process.platform !== 'darwin') return undefined
+
+  try {
+    const { stdout } = await execFileAsync('/usr/bin/xcode-select', ['-p'], {
+      timeout: 1_500,
+      windowsHide: true
+    })
+    const developerDir = stdout.trim()
+    if (!developerDir.endsWith('/Contents/Developer')) return undefined
+    const appPath = dirname(dirname(developerDir))
+    return appPath.endsWith('.app') && (await pathExists(appPath)) ? appPath : undefined
+  } catch {
+    return undefined
+  }
+}
+
 async function resolveEditor(candidate: EditorCandidate): Promise<ResolvedEditor | null> {
   if (!candidateSupportsPlatform(candidate)) return null
 
@@ -259,7 +278,7 @@ async function resolveEditor(candidate: EditorCandidate): Promise<ResolvedEditor
   ])
   const macAppPath =
     process.platform === 'darwin'
-      ? await findFirstExistingPath(candidate.macAppPaths)
+      ? (await findFirstExistingPath(candidate.macAppPaths)) ?? (await candidate.macAppPathResolver?.())
       : undefined
   const available = Boolean(candidate.alwaysAvailable || command || macAppPath)
   if (!available) return null
@@ -302,7 +321,11 @@ function isValidIconDataUrl(dataUrl: string | undefined): dataUrl is string {
 
 function nativeImageToDataUrl(image: Electron.NativeImage): string | undefined {
   if (image.isEmpty()) return undefined
-  const resized = image.resize({ width: EDITOR_ICON_PX, height: EDITOR_ICON_PX, quality: 'best' })
+  const resized = image.resize({
+    width: EDITOR_ICON_SOURCE_PX,
+    height: EDITOR_ICON_SOURCE_PX,
+    quality: 'best'
+  })
   const source = resized.isEmpty() ? image : resized
   const buffer = source.toPNG()
   if (!buffer?.length) return undefined
@@ -316,7 +339,17 @@ async function macIcnsPathToDataUrl(iconPath: string): Promise<string | undefine
   try {
     await execFileAsync(
       '/usr/bin/sips',
-      ['-s', 'format', 'png', '-z', String(EDITOR_ICON_PX), String(EDITOR_ICON_PX), iconPath, '--out', tmpPng],
+      [
+        '-s',
+        'format',
+        'png',
+        '-z',
+        String(EDITOR_ICON_SOURCE_PX),
+        String(EDITOR_ICON_SOURCE_PX),
+        iconPath,
+        '--out',
+        tmpPng
+      ],
       { timeout: 5_000, windowsHide: true }
     )
     const buffer = await readFile(tmpPng)
@@ -332,7 +365,7 @@ async function macIcnsPathToDataUrl(iconPath: string): Promise<string | undefine
 
 async function getFileIconDataUrl(targetPath: string): Promise<string | undefined> {
   try {
-    const icon = await app.getFileIcon(targetPath, { size: 'small' })
+    const icon = await app.getFileIcon(targetPath, { size: 'large' })
     return nativeImageToDataUrl(icon)
   } catch {
     return undefined
@@ -369,11 +402,11 @@ async function editorIconDataUrl(editor: ResolvedEditor): Promise<string | undef
     if (bundleIcon) return bundleIcon
   }
 
-  const targetPath =
-    editor.appPath ??
-    (editor.command && (isAbsolute(editor.command) || process.platform === 'win32')
+  const commandIconPath =
+    editor.command && process.platform !== 'darwin' && (isAbsolute(editor.command) || process.platform === 'win32')
       ? editor.command
-      : undefined)
+      : undefined
+  const targetPath = editor.appPath ?? commandIconPath
 
   if (!targetPath) return undefined
   return getFileIconDataUrl(targetPath)
