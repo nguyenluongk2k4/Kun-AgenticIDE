@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactElement, type ReactNode } from 'react'
+import { isValidElement, useRef, useState, type ReactElement, type ReactNode } from 'react'
 import { ChevronDown, Eye, EyeOff } from 'lucide-react'
 
 export type InlineNotice = {
@@ -127,6 +127,11 @@ export function SettingRow({
   control: ReactNode
   wideControl?: boolean
 }): ReactElement {
+  const compactControl =
+    !wideControl
+    && isValidElement(control)
+    && (control.type === Toggle || control.type === 'button')
+
   return (
     <div
       className={`flex gap-3 px-3 py-4 ${
@@ -141,7 +146,15 @@ export function SettingRow({
           <p className="mt-0.5 text-[13px] leading-relaxed text-ds-muted">{description}</p>
         ) : null}
       </div>
-      <div className={`w-full min-w-0 ${wideControl ? '' : 'sm:max-w-[420px]'}`}>
+      <div
+        className={`w-full min-w-0 ${
+          wideControl
+            ? ''
+            : compactControl
+              ? 'flex justify-end sm:w-fit sm:max-w-none sm:shrink-0'
+              : 'flex justify-end sm:max-w-[420px]'
+        }`}
+      >
         {control}
       </div>
     </div>

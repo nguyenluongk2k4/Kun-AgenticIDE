@@ -255,7 +255,7 @@ export function GeneralSettingsSection({ ctx }: { ctx: Record<string, any> }): R
                     <button
                       type="button"
                       onClick={openOnboardingPreview}
-                      className="w-full rounded-xl border border-ds-border bg-ds-card px-3 py-2 text-[14px] font-medium text-ds-ink shadow-sm transition hover:bg-ds-hover"
+                      className="inline-flex w-fit items-center rounded-xl border border-ds-border bg-ds-card px-3 py-2 text-[14px] font-medium text-ds-ink shadow-sm transition hover:bg-ds-hover"
                     >
                       {t('onboardingPreviewOpen')}
                     </button>
