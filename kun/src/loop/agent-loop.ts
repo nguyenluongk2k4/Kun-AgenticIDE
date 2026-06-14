@@ -1010,7 +1010,9 @@ export class AgentLoop {
     const economyRequest = applyTokenEconomyToRequest(baseRequest, tokenEconomy)
     const request: ModelRequest = {
       ...economyRequest,
-      history: applyRequestHistoryHygiene(economyRequest.history, tokenEconomy.historyHygiene)
+      history: applyRequestHistoryHygiene(economyRequest.history, tokenEconomy.historyHygiene, {
+        currentTurnId: turnId
+      })
     }
     if (tokenEconomy.enabled) {
       await this.recordTokenEconomySavings({
