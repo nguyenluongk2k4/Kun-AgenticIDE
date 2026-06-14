@@ -1773,7 +1773,10 @@ describe('AgentLoop', () => {
         id: 'long_history',
         turnId: 'turn_1',
         threadId: 'thr_1',
-        text: 'x'.repeat(80_000)
+        // ~125k estimated tokens: above the default soft threshold (96k) so a
+        // model-less check compacts, but below the DeepSeek v4 soft threshold
+        // (750k = 0.75 * 1M) so the v4 profiles do not.
+        text: 'x'.repeat(500_000)
       })
     ]
 
@@ -1784,7 +1787,7 @@ describe('AgentLoop', () => {
     expect(compactor.shouldCompact(items)).toBe(true)
     expect(compactor.shouldCompact(items, { model: 'deepseek-v4-pro' })).toBe(false)
     expect(compactor.shouldCompact(items, { model: 'deepseek-v4-flash' })).toBe(false)
-    expect(compactor.hardCap('deepseek-v4-flash')).toBe(990_000)
+    expect(compactor.hardCap('deepseek-v4-flash')).toBe(850_000)
   })
 
   it('uses reported prompt tokens as a compaction pressure signal', () => {
@@ -1933,9 +1936,12 @@ describe('AgentLoop', () => {
     })
 
     expect(compactor.thresholds()).toEqual({ softThreshold: 123, hardThreshold: 456 })
+    // No contextWindowTokens is configured, so the window is inferred as
+    // max(soft, hard) = 2000 and the safety cap clamps the hard threshold to
+    // floor(0.85 * 2000) = 1700.
     expect(compactor.thresholds('vendor/custom-model')).toEqual({
       softThreshold: 1_000,
-      hardThreshold: 2_000
+      hardThreshold: 1_700
     })
   })
 
@@ -2031,7 +2037,7 @@ describe('AgentLoop', () => {
     expect(summaryRequest.contextInstructions?.join('\n')).toContain('history fold')
     expect(summaryPromptItem?.kind).toBe('user_message')
     expect(summaryPromptItem?.kind === 'user_message' ? summaryPromptItem.text : '')
-      .toContain('History excerpt to fold')
+      .toContain('Conversation history to fold')
     expect(mainSummary?.kind === 'compaction' ? mainSummary.summary : '')
       .toContain('Model summary: preserve alpha.txt')
     expect(persistedSummary?.kind === 'compaction' ? persistedSummary.summary : '')
