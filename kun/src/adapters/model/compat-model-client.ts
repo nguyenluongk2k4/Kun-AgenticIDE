@@ -2006,8 +2006,27 @@ function applyAnthropicReasoningEffort(
   if (reasoning?.requestProtocol !== 'anthropic-thinking') return
   const resolved = resolveReasoningEffort(effort, reasoning)
   if (!resolved) return
-  body.thinking = {
-    type: resolved === 'off' ? 'disabled' : 'adaptive'
+  if (resolved === 'off') {
+    body.thinking = { type: 'disabled' }
+    return
+  }
+  body.thinking = { type: 'adaptive' }
+  const outputEffort = anthropicOutputEffortForReasoningEffort(resolved)
+  if (outputEffort) body.output_config = { effort: outputEffort }
+}
+
+function anthropicOutputEffortForReasoningEffort(
+  effort: NormalizedReasoningEffort
+): 'low' | 'medium' | 'high' | 'max' | null {
+  switch (effort) {
+    case 'low':
+    case 'medium':
+    case 'high':
+    case 'max':
+      return effort
+    case 'auto':
+    case 'off':
+      return null
   }
 }
 
