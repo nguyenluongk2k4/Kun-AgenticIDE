@@ -11,7 +11,7 @@ import {
   defaultWriteSettings,
   type AppSettingsV1
 } from '../../shared/app-settings'
-import { listGuiSkills } from './skill-service'
+import { guiSkillRootsForRuntime, listGuiSkillRoots, listGuiSkills } from './skill-service'
 
 describe('skill-service', () => {
   let tempRoot = ''
@@ -97,6 +97,58 @@ describe('skill-service', () => {
     ]))
     expect(projectSkills.map((skill) => skill.id)).not.toContain('skill')
   })
+
+  it('detects workspace .claude/skills as a common directory and counts its skills', async () => {
+    const workspaceRoot = join(tempRoot, 'ws-claude')
+    const skillRoot = join(workspaceRoot, '.claude', 'skills', 'demo')
+    await mkdir(skillRoot, { recursive: true })
+    await writeFile(join(skillRoot, 'SKILL.md'), [
+      '---', 'name: demo', 'description: Demo skill.', '---', '', 'Body.'
+    ].join('\n'), 'utf8')
+
+    const result = await listGuiSkillRoots(createSettings(workspaceRoot), workspaceRoot)
+
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    const claude = result.roots.find((root) => root.labelKey === 'pluginSkillRootWorkspaceClaude')
+    expect(claude).toMatchObject({
+      scope: 'project',
+      source: 'common',
+      exists: true,
+      enabled: true,
+      skillCount: 1
+    })
+    expect(comparable(claude?.path ?? '')).toBe(comparable(join(workspaceRoot, '.claude', 'skills')))
+  })
+
+  it('omits a directory disabled via disabledDirs from runtime roots but still lists it', async () => {
+    const workspaceRoot = join(tempRoot, 'ws-toggle')
+    const claudeSkill = join(workspaceRoot, '.claude', 'skills', 'demo')
+    const agentsSkill = join(workspaceRoot, '.agents', 'skills', 'demo2')
+    await mkdir(claudeSkill, { recursive: true })
+    await mkdir(agentsSkill, { recursive: true })
+    await writeFile(join(claudeSkill, 'SKILL.md'), ['---', 'name: demo', '---', '', 'Body.'].join('\n'), 'utf8')
+    await writeFile(join(agentsSkill, 'SKILL.md'), ['---', 'name: demo2', '---', '', 'Body.'].join('\n'), 'utf8')
+
+    const settings = createSettings(workspaceRoot)
+    settings.claw.skills.disabledDirs = ['workspace-claude']
+
+    const runtimeRoots = (await guiSkillRootsForRuntime(settings, workspaceRoot)).map((root) =>
+      comparable(root.path)
+    )
+    expect(runtimeRoots).not.toContain(comparable(join(workspaceRoot, '.claude', 'skills')))
+    expect(runtimeRoots).toContain(comparable(join(workspaceRoot, '.agents', 'skills')))
+
+    const list = await listGuiSkillRoots(settings, workspaceRoot)
+    expect(list.ok).toBe(true)
+    if (!list.ok) return
+    const claude = list.roots.find((root) => root.labelKey === 'pluginSkillRootWorkspaceClaude')
+    expect(claude?.enabled).toBe(false)
+  })
+
+  function comparable(path: string): string {
+    return path.replace(/\\/g, '/').replace(/\/+$/g, '').toLowerCase()
+  }
 
   function createSettings(workspaceRoot: string): AppSettingsV1 {
     return {

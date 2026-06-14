@@ -59,6 +59,7 @@ export function defaultClawSettings(): ClawSettingsV1 {
     skills: {
       defaultNames: [],
       extraDirs: [],
+      disabledDirs: [],
       promptPrefix: ''
     },
     im: {
@@ -104,6 +105,7 @@ export function normalizeClawSettings(input: ClawSettingsPatchV1 | undefined): C
     skills: {
       defaultNames: compactStrings(skills.defaultNames),
       extraDirs: compactStrings(skills.extraDirs),
+      disabledDirs: compactStrings(skills.disabledDirs),
       promptPrefix: typeof skills.promptPrefix === 'string' ? skills.promptPrefix : ''
     },
     im: {

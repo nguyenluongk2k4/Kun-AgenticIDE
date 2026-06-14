@@ -4,6 +4,7 @@ import { ThreadGoalSchema, ThreadTodoListSchema } from './threads.js'
 import { UsageSnapshotSchema } from './usage.js'
 import { RuntimeErrorSeverity } from './errors.js'
 import { ApprovalPolicySchema, SandboxModeSchema } from './policy.js'
+import { SubagentToolPolicy } from './capabilities.js'
 
 /**
  * Persisted runtime events. Every event has a per-thread `seq` so the
@@ -72,7 +73,22 @@ const RuntimeEventBase = z.object({
     childId: z.string().min(1),
     childLabel: z.string().optional(),
     childStatus: z.enum(['queued', 'running', 'completed', 'failed', 'aborted']),
-    childSeq: z.number().int().nonnegative()
+    childSeq: z.number().int().nonnegative(),
+    // Observability metrics carried alongside the child lifecycle event so
+    // the GUI can show prefix reuse, tool fan-out, timing, and cost per
+    // subagent without a separate diagnostics fetch.
+    childModel: z.string().optional(),
+    childProfile: z.string().optional(),
+    childToolPolicy: SubagentToolPolicy.optional(),
+    prefixReused: z.boolean().optional(),
+    inheritedHistoryItems: z.number().int().nonnegative().optional(),
+    toolInvocations: z.number().int().nonnegative().optional(),
+    durationMs: z.number().int().nonnegative().optional(),
+    queuedMs: z.number().int().nonnegative().optional(),
+    totalTokens: z.number().int().nonnegative().optional(),
+    cacheHitRate: z.number().min(0).max(1).nullable().optional(),
+    costUsd: z.number().nonnegative().optional(),
+    costCny: z.number().nonnegative().optional()
   }).optional()
 })
 

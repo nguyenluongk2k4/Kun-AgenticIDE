@@ -25,6 +25,20 @@ export type CompactionPlan = {
   reason: string
 }
 
+export type CompactionTriggerOptions = {
+  model?: string
+  /** Provider-reported prompt token count for the last request, when known. */
+  promptTokens?: number
+  frozenMessageCount?: number
+  /**
+   * Estimated per-request overhead (system prompt + tool schemas + few-shot
+   * prefix) that is not part of the stored items. Added to the item estimate
+   * as a safety floor for the no-usage path. Ignored when a larger
+   * `promptTokens` is available.
+   */
+  overheadTokens?: number
+}
+
 /**
  * ContextCompactor folds long histories into a single compaction item
  * while preserving pinned user, project, and skill constraints from
@@ -64,15 +78,22 @@ export class ContextCompactor {
     return this.estimator.estimateItems(items)
   }
 
-  shouldCompact(items: TurnItem[], options?: { model?: string; promptTokens?: number; frozenMessageCount?: number }): boolean {
+  shouldCompact(items: TurnItem[], options?: CompactionTriggerOptions): boolean {
     return this.planCompaction(items, options) !== null
   }
 
-  planCompaction(items: TurnItem[], options?: { model?: string; promptTokens?: number; frozenMessageCount?: number }): CompactionPlan | null {
+  planCompaction(items: TurnItem[], options?: CompactionTriggerOptions): CompactionPlan | null {
     const thresholds = this.thresholds(options?.model)
     const frozenMessageCount = normalizeFrozenMessageCount(options?.frozenMessageCount, items.length)
     const compactableItems = frozenMessageCount > 0 ? items.slice(frozenMessageCount) : items
-    const estimatedTokens = this.estimate(compactableItems)
+    // `overheadTokens` accounts for the system prompt and tool schemas that
+    // are sent every turn but live outside the stored items. Without it the
+    // estimate-only path (used when no provider usage count is available,
+    // e.g. the first turn after a restart) systematically under-counts and
+    // skips compaction. It is a floor on the estimate; the real
+    // `promptTokens` still wins via the Math.max below when present.
+    const overheadTokens = Math.max(0, Math.floor(options?.overheadTokens ?? 0))
+    const estimatedTokens = this.estimate(compactableItems) + overheadTokens
     const promptTokens = typeof options?.promptTokens === 'number' ? options.promptTokens : undefined
     const tokens = Math.max(estimatedTokens, promptTokens ?? 0)
     if (tokens < thresholds.softThreshold) return null

@@ -21,6 +21,7 @@ import {
   composerModelMenuItemSelected,
   composerMenuSupportsModel,
   composerReasoningEffortRequestValue,
+  filterComposerModelIds,
   normalizeComposerReasoningEffort
 } from './FloatingComposerModelPicker'
 import { getGoalPanelDraftObjective } from './floating-composer-commands'
@@ -370,6 +371,18 @@ describe('FloatingComposer model controls', () => {
       currentModel: 'deepseek-v4-pro',
       modelId: 'deepseek-v4-pro'
     })).toBe(false)
+  })
+
+  it('filters provider model ids by substring without changing the empty query list', () => {
+    const modelIds = [
+      'deepseek-v4-pro',
+      'MiniMax-M2',
+      'moonshot-v1-128k'
+    ]
+
+    expect(filterComposerModelIds(modelIds, '')).toEqual(modelIds)
+    expect(filterComposerModelIds(modelIds, 'max')).toEqual(['MiniMax-M2'])
+    expect(filterComposerModelIds(modelIds, '128K')).toEqual(['moonshot-v1-128k'])
   })
 
   it('keeps the reasoning strength visible in the model control', () => {

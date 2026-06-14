@@ -18,6 +18,7 @@ import {
 import { rendererRuntimeClient } from '../agent/runtime-client'
 import { getProvider } from '../agent/registry'
 import type {
+  CoreMemoryDiagnosticsJson,
   CoreMemoryRecordJson,
   CoreRuntimeInfoJson,
   CoreRuntimeToolDiagnosticsJson
@@ -25,12 +26,7 @@ import type {
 import type { WriteInlineCompletionDebugEntry } from '@shared/write-inline-completion'
 import { applyTheme, applyUiFontScale } from '../lib/apply-theme'
 import { formatWorkspacePickerError } from '../lib/format-workspace-picker-error'
-import {
-  joinFsPath,
-  loadPreferredSkillRootId,
-  savePreferredSkillRootId,
-  type SkillRootId
-} from '../lib/skill-root-preference'
+import type { SkillRootListItem } from '@shared/kun-gui-api'
 import { normalizeWorkspaceRoot } from '../lib/workspace-path'
 import { useChatStore, type SettingsRouteSection } from '../store/chat-store'
 import { SettingsSidebar } from './SettingsSidebar'
@@ -54,22 +50,18 @@ import {
   ImageGenerationSettingsSection,
   KeyboardShortcutsSettingsSection,
   LlmDebugSettingsSection,
+  WorktreeSettingsSection,
   MediaGenerationSettingsSection,
+  MemorySettingsSection,
   ProvidersSettingsSection,
   SpeechToTextSettingsSection,
   UpdatesSettingsSection,
   WriteSettingsSection
 } from './settings-sections'
 
-type SettingsCategory = 'general' | 'providers' | 'write' | 'imageGeneration' | 'mediaGeneration' | 'speechToText' | 'agents' | 'permissions' | 'shortcuts' | 'easterEgg' | 'claw' | 'updates' | 'debug'
+type SettingsCategory = 'general' | 'providers' | 'write' | 'imageGeneration' | 'mediaGeneration' | 'speechToText' | 'agents' | 'permissions' | 'worktree' | 'memory' | 'shortcuts' | 'easterEgg' | 'claw' | 'updates' | 'debug'
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
 type SettingsPatch = AppSettingsPatch
-type SkillRootOption = {
-  id: SkillRootId
-  label: string
-  path: string
-  available: boolean
-}
 type InlineNotice = {
   tone: 'success' | 'error' | 'info'
   message: string
@@ -101,7 +93,8 @@ export function SettingsView(): ReactElement {
   const [showRuntimeToken, setShowRuntimeToken] = useState(false)
   const [logPath, setLogPath] = useState('')
   const [logDirOpenError, setLogDirOpenError] = useState<string | null>(null)
-  const [skillRootId, setSkillRootId] = useState<SkillRootId>(() => loadPreferredSkillRootId())
+  const [skillRoots, setSkillRoots] = useState<SkillRootListItem[]>([])
+  const [skillRootsLoading, setSkillRootsLoading] = useState(false)
   const [skillNotice, setSkillNotice] = useState<InlineNotice | null>(null)
   const [mcpConfigPath, setMcpConfigPath] = useState('~/.kun/mcp.json')
   const [mcpConfigText, setMcpConfigText] = useState('')
@@ -113,6 +106,7 @@ export function SettingsView(): ReactElement {
   const [runtimeInfo, setRuntimeInfo] = useState<CoreRuntimeInfoJson | null>(null)
   const [toolDiagnostics, setToolDiagnostics] = useState<CoreRuntimeToolDiagnosticsJson | null>(null)
   const [memoryRecords, setMemoryRecords] = useState<CoreMemoryRecordJson[]>([])
+  const [memoryDiagnostics, setMemoryDiagnostics] = useState<CoreMemoryDiagnosticsJson | null>(null)
   const [runtimeDiagnosticsBusy, setRuntimeDiagnosticsBusy] = useState(false)
   const [runtimeDiagnosticsNotice, setRuntimeDiagnosticsNotice] = useState<InlineNotice | null>(null)
   const [writeDebugModalOpen, setWriteDebugModalOpen] = useState(false)
@@ -328,52 +322,24 @@ export function SettingsView(): ReactElement {
     return null
   }, [form, formPort, t])
 
-  const skillRootOptions = useMemo<SkillRootOption[]>(() => {
-    const workspaceRoot = normalizeWorkspaceRoot(formWorkspaceRoot)
-    const hasWorkspace = !!workspaceRoot
-    return [
-      {
-        id: 'workspace-agents',
-        label: tCommon('pluginSkillRootWorkspaceAgents'),
-        path: workspaceRoot ? joinFsPath(workspaceRoot, '.agents/skills') : '',
-        available: hasWorkspace
-      },
-      {
-        id: 'workspace-skills',
-        label: tCommon('pluginSkillRootWorkspaceSkills'),
-        path: workspaceRoot ? joinFsPath(workspaceRoot, 'skills') : '',
-        available: hasWorkspace
-      },
-      {
-        id: 'global-agents',
-        label: tCommon('pluginSkillRootGlobalAgents'),
-        path: '~/.agents/skills',
-        available: true
-      },
-      {
-        id: 'global-deepseek',
-        label: tCommon('pluginSkillRootGlobalDeepseek'),
-        path: '~/.kun/skills',
-        available: true
-      }
-    ]
-  }, [formWorkspaceRoot, tCommon])
-
-  const selectedSkillRoot =
-    skillRootOptions.find((option) => option.id === skillRootId && option.available) ??
-    skillRootOptions.find((option) => option.available)
+  const refreshSkillRoots = useCallback(async (): Promise<void> => {
+    if (typeof window.kunGui?.listSkillRoots !== 'function') return
+    setSkillRootsLoading(true)
+    try {
+      const workspaceRoot = normalizeWorkspaceRoot(formWorkspaceRoot)
+      const result = await window.kunGui.listSkillRoots(workspaceRoot || undefined)
+      if (result.ok) setSkillRoots(result.roots)
+    } catch {
+      /* listing skill roots is best-effort; keep the last known list */
+    } finally {
+      setSkillRootsLoading(false)
+    }
+  }, [formWorkspaceRoot])
 
   useEffect(() => {
-    const selectedOption = skillRootOptions.find((option) => option.id === skillRootId && option.available)
-    if (selectedOption) {
-      savePreferredSkillRootId(skillRootId)
-      return
-    }
-    const fallback = skillRootOptions.find((option) => option.available)
-    if (fallback && fallback.id !== skillRootId) {
-      setSkillRootId(fallback.id)
-    }
-  }, [skillRootId, skillRootOptions])
+    if (category !== 'agents') return
+    void refreshSkillRoots()
+  }, [category, refreshSkillRoots])
 
   const loadMcpConfig = async (): Promise<void> => {
     if (typeof window.kunGui?.getKunConfigFile !== 'function') return
@@ -400,17 +366,33 @@ export function SettingsView(): ReactElement {
     void loadMcpConfig()
   }, [category, mcpLoaded, mcpLoading])
 
-  const openSkillRoot = async (): Promise<void> => {
-    if (!selectedSkillRoot?.path || !selectedSkillRoot.available) {
+  const openSkillRoot = async (path: string): Promise<void> => {
+    if (!path) {
       setSkillNotice({ tone: 'error', message: t('skillsRootUnavailable') })
       return
     }
     if (typeof window.kunGui?.openSkillRoot !== 'function') return
     setSkillNotice(null)
-    const result = await window.kunGui.openSkillRoot(selectedSkillRoot.path)
+    const result = await window.kunGui.openSkillRoot(path)
     if (!result.ok) {
       setSkillNotice({ tone: 'error', message: result.message ?? t('applyFailed') })
     }
+  }
+
+  const toggleSkillRoot = (root: SkillRootListItem, enabled: boolean): void => {
+    const current = form?.claw.skills.disabledDirs ?? []
+    const keys = new Set([root.disableKey, root.id])
+    const nextDisabled = enabled
+      ? current.filter((entry) => !keys.has(entry))
+      : [...new Set([...current, root.disableKey])]
+    update({ claw: { skills: { disabledDirs: nextDisabled } } })
+    // Optimistically reflect the toggle so the row responds before the
+    // debounced save round-trips; skill counts are unaffected by toggling.
+    setSkillRoots((roots) =>
+      roots.map((item) =>
+        item.id === root.id && item.path === root.path ? { ...item, enabled } : item
+      )
+    )
   }
 
   const saveMcpConfig = async (): Promise<void> => {
@@ -471,9 +453,65 @@ export function SettingsView(): ReactElement {
   }, [formWorkspaceRoot])
 
   useEffect(() => {
-    if (category !== 'agents' && category !== 'permissions') return
+    if (category !== 'agents' && category !== 'permissions' && category !== 'memory') return
     void refreshKunDiagnostics()
   }, [category, refreshKunDiagnostics])
+
+  const refreshMemoryDiagnostics = async (): Promise<void> => {
+    const provider = getProvider()
+    if (typeof provider.getMemoryDiagnostics !== 'function') return
+    try {
+      const diagnostics = await provider.getMemoryDiagnostics()
+      setMemoryDiagnostics(diagnostics)
+    } catch {
+      // best-effort; surfaced via runtimeDiagnosticsNotice elsewhere
+    }
+  }
+
+  useEffect(() => {
+    if (category !== 'memory') return
+    void refreshMemoryDiagnostics()
+  }, [category, memoryRecords])
+
+  const createMemoryRecord = async (input: {
+    content: string
+    scope?: 'user' | 'workspace' | 'project'
+    tags?: string[]
+    confidence?: number
+  }): Promise<boolean> => {
+    const provider = getProvider()
+    if (typeof provider.createMemory !== 'function') return false
+    try {
+      const memory = await provider.createMemory(input)
+      setMemoryRecords((records) => [memory, ...records])
+      return true
+    } catch (error) {
+      setRuntimeDiagnosticsNotice({
+        tone: 'error',
+        message: error instanceof Error ? error.message : String(error)
+      })
+      return false
+    }
+  }
+
+  const updateMemoryRecord = async (
+    memoryId: string,
+    patch: { content?: string; tags?: string[]; confidence?: number; disabled?: boolean }
+  ): Promise<boolean> => {
+    const provider = getProvider()
+    if (typeof provider.updateMemory !== 'function') return false
+    try {
+      const memory = await provider.updateMemory(memoryId, patch)
+      setMemoryRecords((records) => records.map((record) => (record.id === memoryId ? memory : record)))
+      return true
+    } catch (error) {
+      setRuntimeDiagnosticsNotice({
+        tone: 'error',
+        message: error instanceof Error ? error.message : String(error)
+      })
+      return false
+    }
+  }
 
   const disableMemoryRecord = async (memoryId: string): Promise<void> => {
     const provider = getProvider()
@@ -821,10 +859,9 @@ export function SettingsView(): ReactElement {
     skillSectionRef,
     mcpSectionRef,
     permissionsSectionRef,
-    selectedSkillRoot,
-    skillRootOptions,
-    skillRootId,
-    setSkillRootId,
+    skillRoots,
+    skillRootsLoading,
+    toggleSkillRoot,
     skillNotice,
     openSkillRoot,
     openPlugins,
@@ -841,9 +878,12 @@ export function SettingsView(): ReactElement {
     runtimeInfo,
     toolDiagnostics,
     memoryRecords,
+    memoryDiagnostics,
     runtimeDiagnosticsBusy,
     runtimeDiagnosticsNotice,
     refreshKunDiagnostics,
+    createMemoryRecord,
+    updateMemoryRecord,
     disableMemoryRecord,
     deleteMemoryRecord,
     pickClawWorkspace,
@@ -913,6 +953,8 @@ export function SettingsView(): ReactElement {
           {category === 'mediaGeneration' ? <MediaGenerationSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'speechToText' ? <SpeechToTextSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'agents' || category === 'permissions' ? <AgentsSettingsSection ctx={settingsSectionContext} /> : null}
+          {category === 'worktree' ? <WorktreeSettingsSection ctx={settingsSectionContext} /> : null}
+          {category === 'memory' ? <MemorySettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'shortcuts' ? <KeyboardShortcutsSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'easterEgg' ? <EasterEggSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'claw' ? <ClawSettingsSection ctx={settingsSectionContext} /> : null}

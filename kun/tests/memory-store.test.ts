@@ -165,6 +165,63 @@ describe('Memory store and recall', () => {
     expect(finalInstructions).toContain('<shell_environment>')
   })
 
+  it('retrieves memories for CJK queries (regression: token-split-on-[^a-z0-9_])', async () => {
+    const store = createStore()
+    // Use workspace scope so this exercises the scored n-gram path. (user scope
+    // is now injected unconditionally, which would mask the n-gram behavior.)
+    const memory = await store.create({
+      content: '用户的名字叫小明，喜欢用 TypeScript',
+      scope: 'workspace',
+      workspace: '/tmp/ws'
+    })
+
+    // A pure-Chinese query must match a Chinese memory. The previous
+    // implementation split on [^a-z0-9_]+, which treated every CJK character
+    // as a separator and returned an empty token set, so retrieval always
+    // missed. With n-gram matching this must now succeed.
+    const hits = await store.retrieve({ query: '用户叫什么名字', workspace: '/tmp/ws', limit: 3 })
+    expect(hits.map((item) => item.id)).toEqual([memory.id])
+
+    // Unrelated CJK query should not match.
+    const misses = await store.retrieve({ query: '今天天气怎么样', workspace: '/tmp/ws', limit: 3 })
+    expect(misses).toEqual([])
+  })
+
+  it('retrieves workspace-scope memories that have no workspace field (GUI-created)', async () => {
+    const store = createStore()
+    // GUI-created workspace memories may omit the workspace field. They should
+    // still be retrievable instead of being silently filtered out by inScope.
+    const memory = await store.create({
+      content: 'Workspace prefers tabs over spaces',
+      scope: 'workspace'
+    })
+    expect(memory.workspace).toBeUndefined()
+    const hits = await store.retrieve({ query: 'tabs spaces indentation', workspace: '/tmp/ws', limit: 3 })
+    expect(hits.map((item) => item.id)).toEqual([memory.id])
+  })
+
+  it('injects user-scope memories on semantic queries with zero keyword overlap', async () => {
+    const store = createStore()
+    const userMemory = await store.create({
+      content: 'whitelonng',
+      scope: 'user'
+    })
+    // "who am I" shares zero characters with "whitelonng". Keyword retrieval
+    // (word or n-gram) cannot match this, so user memories must be injected
+    // unconditionally instead of gated behind scored retrieval.
+    const hits = await store.retrieve({ query: 'who am I', workspace: '/tmp/ws', limit: 8 })
+    expect(hits.map((item) => item.id)).toContain(userMemory.id)
+
+    // Chinese semantic query should also hit the user memory.
+    const cjkHits = await store.retrieve({ query: '你知道我是谁吗', workspace: '/tmp/ws', limit: 8 })
+    expect(cjkHits.map((item) => item.id)).toContain(userMemory.id)
+
+    // Disabled user memories are still excluded.
+    await store.update(userMemory.id, { disabled: true })
+    const afterDisable = await store.retrieve({ query: 'who am I', workspace: '/tmp/ws', limit: 8 })
+    expect(afterDisable.map((item) => item.id)).not.toContain(userMemory.id)
+  })
+
   it('writes memory records atomically (no .tmp file left on success)', async () => {
     const store = createStore()
     await store.create({ content: 'atomic test memory' })

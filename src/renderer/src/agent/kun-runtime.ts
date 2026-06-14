@@ -646,6 +646,28 @@ export class KunRuntimeProvider implements AgentProvider {
     ).memories ?? []
   }
 
+  async createMemory(input: {
+    content: string
+    scope?: 'user' | 'workspace' | 'project'
+    workspace?: string
+    project?: string
+    tags?: string[]
+    confidence?: number
+  }): Promise<CoreMemoryRecordJson> {
+    const response = await rendererRuntimeClient.runtimeRequest(
+      KUN_MEMORY_PATH,
+      'POST',
+      JSON.stringify(input)
+    )
+    if (!response.ok) {
+      throw runtimeErrorToError(readRuntimeError(response.body, 'failed to create memory'))
+    }
+    return readRuntimeJson<{ memory: CoreMemoryRecordJson }>(
+      response.body,
+      'runtime returned an invalid memory response'
+    ).memory
+  }
+
   async updateMemory(
     memoryId: string,
     patch: { content?: string; tags?: string[]; confidence?: number; disabled?: boolean }

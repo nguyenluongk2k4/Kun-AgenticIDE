@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { CapabilityRegistry } from '../src/adapters/tool/capability-registry.js'
-import { LocalToolHost } from '../src/adapters/tool/local-tool-host.js'
+import { LocalToolHost, buildDefaultLocalTools } from '../src/adapters/tool/local-tool-host.js'
 import { createImmutablePrefix } from '../src/cache/immutable-prefix.js'
 import { createChildAgentExecutor } from '../src/delegation/child-agent-executor.js'
 import type { ModelClient, ModelRequest, ModelStreamChunk } from '../src/ports/model-client.js'
@@ -54,10 +54,12 @@ describe('child agent executor', () => {
       label: 'research',
       prompt: 'Research the issue',
       workspace: '/tmp/project',
+      toolPolicy: 'inherit',
       signal: new AbortController().signal
     })
 
     expect(result.summary).toBe('child answer')
+    expect(result).toMatchObject({ prefixReused: true, inheritedHistoryItems: 0 })
     expect(result.usage).toMatchObject({
       promptTokens: 11,
       completionTokens: 3,
@@ -95,7 +97,47 @@ describe('child agent executor', () => {
       parentThreadId: 'thr_parent',
       parentTurnId: 'turn_parent',
       prompt: 'Fail',
+      toolPolicy: 'readOnly',
       signal: new AbortController().signal
     })).rejects.toThrow(/child agent failed|model failed/i)
+  })
+
+  it('restricts a read-only child to investigation tools and a preamble prompt', async () => {
+    const seen: ModelRequest[] = []
+    const registry = new CapabilityRegistry([{
+      id: 'builtin',
+      kind: 'built-in',
+      enabled: true,
+      available: true,
+      tools: buildDefaultLocalTools()
+    }])
+    const executor = createChildAgentExecutor({
+      model: model([
+        { kind: 'assistant_text_delta', text: 'done' },
+        { kind: 'completed', stopReason: 'stop' }
+      ], seen),
+      toolHost: new LocalToolHost({ registry }),
+      prefix: createImmutablePrefix({ systemPrompt: 'child system' }),
+      defaultModel: 'child-test',
+      nowIso: () => '2026-06-03T00:00:00.000Z'
+    })
+
+    const result = await executor({
+      childId: 'child_ro',
+      parentThreadId: 'thr_parent',
+      parentTurnId: 'turn_parent',
+      prompt: 'Investigate the bug',
+      promptPreamble: 'Read-only review.',
+      toolPolicy: 'readOnly',
+      signal: new AbortController().signal
+    })
+
+    const toolNames = (seen[0]?.tools ?? []).map((tool) => tool.name).sort()
+    expect(toolNames).toEqual(['find', 'grep', 'ls', 'read'])
+    expect(seen[0]?.history?.[0]).toMatchObject({
+      kind: 'user_message',
+      text: 'Read-only review.\n\nInvestigate the bug'
+    })
+    expect(result).toMatchObject({ prefixReused: true, inheritedHistoryItems: 0 })
   })
 })

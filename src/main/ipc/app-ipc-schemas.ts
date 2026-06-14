@@ -394,7 +394,8 @@ const kunRuntimePatchSchema = z.object({
   modelProfiles: z.record(
     z.string().trim().min(1).max(128),
     modelProfilePatchSchema.nullable()
-  ).optional()
+  ).optional(),
+  memoryEnabled: z.boolean().optional()
 }).strict()
 
 const logPatchSchema = z.object({
@@ -467,6 +468,7 @@ const writeSettingsPatchSchema = z.object({
 const clawSkillPatchSchema = z.object({
   defaultNames: z.array(trimmedString(128)).max(128).optional(),
   extraDirs: z.array(trimmedString(MAX_PATH_LENGTH)).max(128).optional(),
+  disabledDirs: z.array(trimmedString(MAX_PATH_LENGTH)).max(128).optional(),
   promptPrefix: z.string().max(MAX_CHANNEL_TEXT_LENGTH).optional()
 }).strict()
 
@@ -588,7 +590,8 @@ const clawSettingsPatchSchema = z.object({
 
 const scheduleSkillPatchSchema = z.object({
   defaultNames: z.array(trimmedString(128)).max(128).optional(),
-  extraDirs: z.array(trimmedString(MAX_PATH_LENGTH)).max(128).optional()
+  extraDirs: z.array(trimmedString(MAX_PATH_LENGTH)).max(128).optional(),
+  disabledDirs: z.array(trimmedString(MAX_PATH_LENGTH)).max(128).optional()
 }).strict()
 
 const scheduleInternalPatchSchema = z.object({
@@ -709,6 +712,50 @@ export const gitBranchPayloadSchema = z
     branch: trimmedString(MAX_BRANCH_LENGTH)
   })
   .strict()
+
+export const worktreeOptionalRootSchema = z.object({
+  projectPath: trimmedString(MAX_PATH_LENGTH),
+  poolIndex: z.number().int().min(0).max(2),
+  taskId: trimmedString(MAX_BRANCH_LENGTH),
+  force: z.boolean().optional(),
+  worktreeRoot: optionalTrimmedString(MAX_PATH_LENGTH)
+}).strict()
+
+export const worktreePoolSchema = z.object({
+  projectPath: trimmedString(MAX_PATH_LENGTH),
+  worktreeRoot: optionalTrimmedString(MAX_PATH_LENGTH)
+}).strict()
+
+export const worktreePoolIndexSchema = z.object({
+  projectPath: trimmedString(MAX_PATH_LENGTH),
+  poolIndex: z.number().int().min(0).max(2),
+  worktreeRoot: optionalTrimmedString(MAX_PATH_LENGTH)
+}).strict()
+
+export const worktreeMergeSchema = z.object({
+  projectPath: trimmedString(MAX_PATH_LENGTH),
+  poolIndex: z.number().int().min(0).max(2),
+  commitMessage: optionalTrimmedString(4_000),
+  worktreeRoot: optionalTrimmedString(MAX_PATH_LENGTH)
+}).strict()
+
+export const worktreePathSchema = z.object({
+  worktreePath: trimmedString(MAX_PATH_LENGTH)
+}).strict()
+
+export const worktreeProjectPathSchema = z.object({
+  projectPath: trimmedString(MAX_PATH_LENGTH)
+}).strict()
+
+export const worktreeContinueMergeSchema = z.object({
+  projectPath: trimmedString(MAX_PATH_LENGTH),
+  message: optionalTrimmedString(4_000)
+}).strict()
+
+export const worktreeCommitSchema = z.object({
+  worktreePath: trimmedString(MAX_PATH_LENGTH),
+  message: trimmedString(4_000)
+}).strict()
 
 export const openEditorPathPayloadSchema = z
   .object({

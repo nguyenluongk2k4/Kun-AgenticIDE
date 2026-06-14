@@ -7,6 +7,7 @@ import type {
 } from './builtin-tool-types.js'
 import { createBashLocalTool } from './builtin-bash-tool.js'
 import { createEditLocalTool, createWriteLocalTool } from './builtin-file-tools.js'
+import { createLspLocalTool } from './builtin-lsp-tool.js'
 import { createReadLocalTool } from './builtin-read-tool.js'
 import { createFindLocalTool, createGrepLocalTool, createLsLocalTool } from './builtin-search-tools.js'
 
@@ -55,7 +56,8 @@ export function buildBuiltinLocalTools(options: BuiltinLocalToolsOptions = {}): 
     createWriteLocalTool(options.write),
     createGrepLocalTool(options.grep),
     createFindLocalTool(options.find),
-    createLsLocalTool(options.ls)
+    createLsLocalTool(options.ls),
+    createLspLocalTool()
   ]
 }
 

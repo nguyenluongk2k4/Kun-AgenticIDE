@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { InMemoryEventBus } from '../src/adapters/in-memory-event-bus.js'
 import { LocalToolHost, buildDefaultLocalTools } from '../src/adapters/tool/local-tool-host.js'
+import { CapabilityRegistry } from '../src/adapters/tool/capability-registry.js'
 import { CREATE_PLAN_TOOL_NAME } from '../src/adapters/tool/create-plan-tool.js'
 import { GET_GOAL_TOOL_NAME, UPDATE_GOAL_TOOL_NAME } from '../src/adapters/tool/goal-tools.js'
 import { FileThreadStore, FileSessionStore } from '../src/adapters/file/index.js'
@@ -259,6 +260,58 @@ describe('AgentLoop', () => {
     expect(sessionItems.filter((item) => item.turnId === h.turnId).map((item) => item.kind))
       .toEqual(['user_message'])
     expect(turnItems.map((item) => item.kind)).toEqual(['user_message'])
+  })
+
+  it('keeps partial assistant text when interrupting a foreground turn', async () => {
+    let resolveDelta: (() => void) | undefined
+    const sawDelta = new Promise<void>((resolve) => {
+      resolveDelta = resolve
+    })
+    const h = makeHarness({
+      provider: 'partial-abort',
+      model: 'partial-abort',
+      async *stream(request: ModelRequest): AsyncIterable<ModelStreamChunk> {
+        yield { kind: 'assistant_text_delta', text: 'partial answer' }
+        resolveDelta?.()
+        await new Promise<void>((resolve) => {
+          if (request.abortSignal.aborted) {
+            resolve()
+            return
+          }
+          request.abortSignal.addEventListener('abort', () => resolve(), { once: true })
+        })
+        yield { kind: 'completed', stopReason: 'stop' }
+      }
+    })
+    await bootstrapThread(h)
+
+    const run = h.loop.runTurn(h.threadId, h.turnId)
+    await sawDelta
+    await h.turns.interruptTurn({ threadId: h.threadId, turnId: h.turnId })
+    const status = await run
+    const sessionItems = await h.sessionStore.loadItems(h.threadId)
+    const thread = await h.threadStore.get(h.threadId)
+    const turnItems = thread?.turns.find((turn) => turn.id === h.turnId)?.items ?? []
+
+    expect(status).toBe('aborted')
+    expect(sessionItems).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'assistant_text',
+          text: 'partial answer',
+          status: 'completed'
+        })
+      ])
+    )
+    expect(turnItems).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'assistant_text',
+          text: 'partial answer',
+          status: 'completed'
+        })
+      ])
+    )
   })
 
   it('runs a tool call and surfaces its result item', async () => {
@@ -589,6 +642,82 @@ describe('AgentLoop', () => {
     expect(status).toBe('completed')
     expect(started).toEqual(['read', 'grep'])
     expect(resultCallIds).toEqual(['call_read', 'call_grep'])
+  })
+
+  it('fans out multiple delegate_task calls from one message in a single parallel batch', async () => {
+    const started: string[] = []
+    let resolveBothStarted!: () => void
+    let releaseChildren!: () => void
+    const bothStarted = new Promise<void>((resolve) => {
+      resolveBothStarted = resolve
+    })
+    const release = new Promise<void>((resolve) => {
+      releaseChildren = resolve
+    })
+    // A single delegation-kind tool invoked twice in one assistant message.
+    // If the loop ran these sequentially, only the first would start and the
+    // second would never reach `bothStarted` before the release.
+    const delegateTool = LocalToolHost.defineTool({
+      name: 'delegate_task',
+      description: 'fake delegation tool',
+      inputSchema: { type: 'object', properties: { prompt: { type: 'string' } } },
+      policy: 'auto',
+      execute: async (args) => {
+        started.push(String(args.prompt))
+        if (started.length === 2) resolveBothStarted()
+        await release
+        return { output: { summary: `done ${String(args.prompt)}` } }
+      }
+    })
+    const toolHost = new LocalToolHost({
+      registry: new CapabilityRegistry([
+        { id: 'delegation', kind: 'delegation', enabled: true, available: true, tools: [delegateTool] }
+      ])
+    })
+    let calls = 0
+    const h = makeHarness(
+      {
+        provider: 'delegation-model',
+        model: 'delegation-model',
+        async *stream(): AsyncIterable<ModelStreamChunk> {
+          calls += 1
+          if (calls === 1) {
+            yield { kind: 'tool_call_complete', callId: 'call_a', toolName: 'delegate_task', arguments: { prompt: 'a' } }
+            yield { kind: 'tool_call_complete', callId: 'call_b', toolName: 'delegate_task', arguments: { prompt: 'b' } }
+            yield { kind: 'completed', stopReason: 'tool_calls' }
+            return
+          }
+          yield { kind: 'completed', stopReason: 'stop' }
+        }
+      },
+      { toolHost }
+    )
+    await bootstrapThread(h)
+
+    const run = h.loop.runTurn(h.threadId, h.turnId)
+    let startupError: Error | undefined
+    try {
+      await Promise.race([
+        bothStarted,
+        new Promise<void>((_resolve, reject) => {
+          setTimeout(() => reject(new Error(`only started ${started.join(',') || 'none'}`)), 200)
+        })
+      ])
+    } catch (error) {
+      startupError = error instanceof Error ? error : new Error(String(error))
+    } finally {
+      releaseChildren()
+    }
+    const status = await run
+    if (startupError) throw startupError
+
+    const resultCallIds = (await h.sessionStore.loadItems(h.threadId))
+      .filter((item) => item.kind === 'tool_result')
+      .map((item) => item.kind === 'tool_result' ? item.callId : '')
+
+    expect(status).toBe('completed')
+    expect(started.sort()).toEqual(['a', 'b'])
+    expect(resultCallIds).toEqual(['call_a', 'call_b'])
   })
 
 	  it('repairs wrapped tool arguments before persisting and dispatching calls', async () => {
@@ -1773,7 +1902,10 @@ describe('AgentLoop', () => {
         id: 'long_history',
         turnId: 'turn_1',
         threadId: 'thr_1',
-        text: 'x'.repeat(80_000)
+        // ~125k estimated tokens: above the default soft threshold (96k) so a
+        // model-less check compacts, but below the DeepSeek v4 soft threshold
+        // (750k = 0.75 * 1M) so the v4 profiles do not.
+        text: 'x'.repeat(500_000)
       })
     ]
 
@@ -1784,7 +1916,7 @@ describe('AgentLoop', () => {
     expect(compactor.shouldCompact(items)).toBe(true)
     expect(compactor.shouldCompact(items, { model: 'deepseek-v4-pro' })).toBe(false)
     expect(compactor.shouldCompact(items, { model: 'deepseek-v4-flash' })).toBe(false)
-    expect(compactor.hardCap('deepseek-v4-flash')).toBe(990_000)
+    expect(compactor.hardCap('deepseek-v4-flash')).toBe(850_000)
   })
 
   it('uses reported prompt tokens as a compaction pressure signal', () => {
@@ -1800,6 +1932,27 @@ describe('AgentLoop', () => {
 
     expect(compactor.shouldCompact(tinyHistory)).toBe(false)
     expect(compactor.shouldCompact(tinyHistory, { promptTokens: 120 })).toBe(true)
+  })
+
+  it('adds per-request overhead to the estimate-only compaction trigger', () => {
+    const compactor = new ContextCompactor({ softThreshold: 100, hardThreshold: 200 })
+    const tinyHistory = [
+      makeUserItem({
+        id: 'tiny_history',
+        turnId: 'turn_1',
+        threadId: 'thr_1',
+        text: 'short'
+      })
+    ]
+
+    // Item text alone is far below the soft threshold and would skip
+    // compaction when no provider usage count is available.
+    expect(compactor.shouldCompact(tinyHistory)).toBe(false)
+    // The system prompt + tool schemas sent every turn (overheadTokens)
+    // are added as a floor, so the estimate-only path still triggers.
+    expect(compactor.shouldCompact(tinyHistory, { overheadTokens: 500 })).toBe(true)
+    expect(compactor.planCompaction(tinyHistory, { overheadTokens: 500 })?.reason)
+      .toContain('estimated prompt tokens')
   })
 
   it('plans normal, aggressive, and force compaction levels', () => {
@@ -1912,9 +2065,12 @@ describe('AgentLoop', () => {
     })
 
     expect(compactor.thresholds()).toEqual({ softThreshold: 123, hardThreshold: 456 })
+    // No contextWindowTokens is configured, so the window is inferred as
+    // max(soft, hard) = 2000 and the safety cap clamps the hard threshold to
+    // floor(0.85 * 2000) = 1700.
     expect(compactor.thresholds('vendor/custom-model')).toEqual({
       softThreshold: 1_000,
-      hardThreshold: 2_000
+      hardThreshold: 1_700
     })
   })
 
@@ -2010,7 +2166,7 @@ describe('AgentLoop', () => {
     expect(summaryRequest.contextInstructions?.join('\n')).toContain('history fold')
     expect(summaryPromptItem?.kind).toBe('user_message')
     expect(summaryPromptItem?.kind === 'user_message' ? summaryPromptItem.text : '')
-      .toContain('History excerpt to fold')
+      .toContain('Conversation history to fold')
     expect(mainSummary?.kind === 'compaction' ? mainSummary.summary : '')
       .toContain('Model summary: preserve alpha.txt')
     expect(persistedSummary?.kind === 'compaction' ? persistedSummary.summary : '')

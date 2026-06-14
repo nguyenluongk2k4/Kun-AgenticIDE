@@ -13,6 +13,13 @@ import type {
 import type { EditorListResult, EditorOpenResult, OpenEditorPathOptions } from './editor'
 import type { GitBranchesResult } from './git-branches'
 import type {
+  MergeResult,
+  SyncResult,
+  WorktreeChanges,
+  WorktreeInfo,
+  WorktreePoolStatus
+} from './worktree'
+import type {
   GuiUpdateChannel,
   GuiUpdateDownloadResult,
   GuiUpdateInfo,
@@ -120,6 +127,20 @@ export type SkillListItem = {
 export type SkillListResult =
   | { ok: true; skills: SkillListItem[]; validationErrors: Array<{ root: string; message: string }> }
   | { ok: false; message: string }
+export type SkillRootListItem = {
+  id: string
+  disableKey: string
+  path: string
+  scope: 'project' | 'global'
+  source: 'common' | 'extra'
+  labelKey?: string
+  exists: boolean
+  enabled: boolean
+  skillCount: number
+}
+export type SkillRootListResult =
+  | { ok: true; roots: SkillRootListItem[] }
+  | { ok: false; message: string }
 export type UiPluginListIpcResult = { plugins: UiPluginListItem[] }
 export type UiPluginInstallIpcResult =
   | { canceled: true }
@@ -204,6 +225,7 @@ export type KunGuiApi = {
   pickWorkspaceDirectory: (defaultPath?: string) => Promise<WorkspacePickResult>
   confirmDialog: (options: ConfirmDialogOptions) => Promise<boolean>
   listSkills: (workspaceRoot?: string) => Promise<SkillListResult>
+  listSkillRoots: (workspaceRoot?: string) => Promise<SkillRootListResult>
   saveSkillFile: (rootPath: string, skillName: string, content: string) => Promise<SkillSaveResult>
   openSkillRoot: (rootPath: string) => Promise<PathOpenResult>
   listUiPlugins: () => Promise<UiPluginListIpcResult>
@@ -216,6 +238,41 @@ export type KunGuiApi = {
   getGitBranches: (workspaceRoot: string) => Promise<GitBranchesResult>
   switchGitBranch: (workspaceRoot: string, branch: string) => Promise<GitBranchesResult>
   createAndSwitchGitBranch: (workspaceRoot: string, branch: string) => Promise<GitBranchesResult>
+  acquireWorktree: (params: {
+    projectPath: string
+    poolIndex: number
+    taskId: string
+    force?: boolean
+    worktreeRoot?: string
+  }) => Promise<WorktreeInfo>
+  releaseWorktree: (params: { projectPath: string; poolIndex: number }) => Promise<void>
+  listWorktrees: (params: { projectPath: string; worktreeRoot?: string }) => Promise<WorktreePoolStatus>
+  removeWorktree: (params: {
+    projectPath: string
+    poolIndex: number
+    worktreeRoot?: string
+  }) => Promise<void>
+  getWorktreeChanges: (params: { worktreePath: string }) => Promise<WorktreeChanges>
+  commitWorktree: (params: { worktreePath: string; message: string }) => Promise<string>
+  mergeWorktree: (params: {
+    projectPath: string
+    poolIndex: number
+    commitMessage?: string
+    worktreeRoot?: string
+  }) => Promise<MergeResult>
+  abortWorktreeMerge: (params: { projectPath: string }) => Promise<void>
+  continueWorktreeMerge: (params: { projectPath: string; message?: string }) => Promise<MergeResult>
+  syncWorktreeFromMain: (params: {
+    projectPath: string
+    poolIndex: number
+    worktreeRoot?: string
+  }) => Promise<SyncResult>
+  abortWorktreeRebase: (params: { worktreePath: string }) => Promise<void>
+  cleanupWorktrees: (params: { projectPath: string; worktreeRoot?: string }) => Promise<void>
+  findAvailableWorktreePoolIndex: (params: {
+    projectPath: string
+    worktreeRoot?: string
+  }) => Promise<number | null>
   listEditors: () => Promise<EditorListResult>
   openEditorPath: (options: OpenEditorPathOptions) => Promise<EditorOpenResult>
   listWorkspaceDirectory: (options: WorkspaceDirectoryTarget) => Promise<WorkspaceDirectoryListResult>

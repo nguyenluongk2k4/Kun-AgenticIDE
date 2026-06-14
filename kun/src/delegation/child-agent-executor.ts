@@ -4,7 +4,7 @@ import { InMemorySessionStore } from '../adapters/in-memory-session-store.js'
 import { InMemoryThreadStore } from '../adapters/in-memory-thread-store.js'
 import { InMemoryUserInputGate } from '../adapters/in-memory-user-input-gate.js'
 import type { ImmutablePrefix } from '../cache/immutable-prefix.js'
-import type { ModelCapabilityMetadata } from '../contracts/capabilities.js'
+import { SUBAGENT_READ_ONLY_TOOL_NAMES, type ModelCapabilityMetadata } from '../contracts/capabilities.js'
 import type { TurnItem } from '../contracts/items.js'
 import type { ApprovalPolicy, SandboxMode } from '../contracts/policy.js'
 import type { RuntimeTuningConfig } from '../config/kun-config.js'
@@ -79,6 +79,12 @@ export function createChildAgentExecutor(options: ChildAgentExecutorOptions): Ch
       ids,
       nowIso
     })
+    // Read-only children advertise only investigation tools. The allow-list
+    // is enforced twice by the capability registry: tools outside it are
+    // dropped from the model's tool schema and rejected at execute time.
+    const forcedAllowedToolNames = input.toolPolicy === 'readOnly'
+      ? [...SUBAGENT_READ_ONLY_TOOL_NAMES]
+      : undefined
     const loop = new AgentLoop({
       threadStore,
       sessionStore,
@@ -95,6 +101,7 @@ export function createChildAgentExecutor(options: ChildAgentExecutorOptions): Ch
       prefix: options.prefix,
       ids,
       nowIso,
+      ...(forcedAllowedToolNames ? { forcedAllowedToolNames } : {}),
       ...(options.modelCapabilities ? { modelCapabilities: options.modelCapabilities } : {}),
       ...(options.skillRuntime ? { skillRuntime: options.skillRuntime } : {}),
       ...(options.memoryStore ? { memoryStore: options.memoryStore } : {}),
@@ -116,12 +123,19 @@ export function createChildAgentExecutor(options: ChildAgentExecutorOptions): Ch
       id: input.childId,
       title: childThreadTitle(input.childId, input.label)
     })
+    // A profile preamble rides in the prompt body (not the system prompt) so
+    // the cached stable prefix stays byte-identical to the main agent's.
+    const prompt = input.promptPreamble?.trim()
+      ? `${input.promptPreamble.trim()}\n\n${input.prompt}`
+      : input.prompt
     const started = await turns.startTurn({
       threadId: thread.id,
       request: {
-        prompt: input.prompt,
+        prompt,
         model,
-        mode: 'agent'
+        mode: 'agent',
+        // Children have no GUI surface to answer structured input prompts.
+        disableUserInput: true
       }
     })
     const status = await loop.runTurn(thread.id, started.turnId)
@@ -132,12 +146,20 @@ export function createChildAgentExecutor(options: ChildAgentExecutorOptions): Ch
     }
     const items = await sessionStore.loadItems(thread.id)
     const summary = summarizeChildTurn(items, started.turnId, status)
+    const toolInvocations = items.filter(
+      (item) => item.turnId === started.turnId && item.kind === 'tool_call'
+    ).length
     if (status !== 'completed') {
       throw new Error(summary || `child agent ${status}`)
     }
     return {
       summary,
-      usage: usage.forThread(thread.id)
+      usage: usage.forThread(thread.id),
+      toolInvocations,
+      // The child loop was constructed with the main agent's immutable
+      // prefix; only the small delegation prompt is appended fresh.
+      prefixReused: true,
+      inheritedHistoryItems: 0
     }
   }
 }

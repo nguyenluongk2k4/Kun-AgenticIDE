@@ -214,6 +214,8 @@ export type KunRuntimeSettingsV1 = {
   videoGeneration: KunVideoGenerationSettingsV1
   /** GUI-owned model capability profiles written into Kun `models.profiles`. */
   modelProfiles: Record<string, ModelProviderModelProfileV1>
+  /** Whether long-term memory is enabled in the Kun runtime. */
+  memoryEnabled: boolean
 }
 
 export type KunImageGenerationSettingsV1 = {
@@ -420,6 +422,11 @@ export type AppBehaviorConfigV1 = {
 export type ScheduleSkillSettingsV1 = {
   defaultNames: string[]
   extraDirs: string[]
+  /**
+   * Discovered skill roots the user turned off. Holds common-directory ids
+   * (e.g. `global-codex`) and/or normalized absolute paths for custom dirs.
+   */
+  disabledDirs: string[]
 }
 
 export type ScheduledTaskScheduleV1 = {
@@ -474,6 +481,11 @@ export type ScheduleSettingsV1 = {
 export type ClawSkillSettingsV1 = {
   defaultNames: string[]
   extraDirs: string[]
+  /**
+   * Discovered skill roots the user turned off. Holds common-directory ids
+   * (e.g. `global-codex`) and/or normalized absolute paths for custom dirs.
+   */
+  disabledDirs: string[]
   promptPrefix: string
 }
 

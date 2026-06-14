@@ -350,6 +350,53 @@ describe('CompatModelClient', () => {
     expect(sentBodies[0]?.thinking).toEqual({ type: 'adaptive' })
   })
 
+  it('sends Anthropic Messages effort with adaptive thinking from a model reasoning profile', async () => {
+    const sentBodies: Array<Record<string, unknown>> = []
+    const fetchImpl: typeof fetch = async (_url, init) => {
+      sentBodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>)
+      return new Response(JSON.stringify({
+        id: 'msg_effort',
+        type: 'message',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'ok' }],
+        stop_reason: 'end_turn'
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' }
+      })
+    }
+    const client = new CompatModelClient({
+      baseUrl: 'https://example.com/anthropic',
+      apiKey: 'k',
+      model: 'deepseek-v4-pro',
+      endpointFormat: 'messages',
+      fetchImpl,
+      nonStreaming: true,
+      modelCapabilities: (model) => ({
+        id: model,
+        inputModalities: ['text'],
+        outputModalities: ['text'],
+        supportsToolCalling: true,
+        contextWindowTokens: 1_000_000,
+        messageParts: ['text'],
+        reasoning: {
+          supportedEfforts: ['off', 'low', 'medium', 'high', 'max'],
+          defaultEffort: 'max',
+          requestProtocol: 'anthropic-thinking'
+        }
+      })
+    })
+    const request = buildRequest(new AbortController().signal)
+    request.model = 'deepseek-v4-pro'
+    request.reasoningEffort = 'max'
+    for await (const _chunk of client.stream(request)) {
+      // drain
+    }
+
+    expect(sentBodies[0]?.thinking).toEqual({ type: 'adaptive' })
+    expect(sentBodies[0]?.output_config).toEqual({ effort: 'max' })
+  })
+
   it('does not send thinking controls for MiniMax M2.x built-in reasoning profiles', async () => {
     const sentBodies: Array<Record<string, unknown>> = []
     const fetchImpl: typeof fetch = async (_url, init) => {

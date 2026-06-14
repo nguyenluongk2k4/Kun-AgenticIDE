@@ -4,6 +4,8 @@ import { LocalToolHost } from './local-tool-host.js'
 
 export function buildDelegationToolProviders(runtime: DelegationRuntime | undefined): CapabilityToolProvider[] {
   if (!runtime) return []
+  const profiles = runtime.listProfiles()
+  const profileNames = profiles.map((profile) => profile.name)
   return [{
     id: 'delegation',
     kind: 'delegation',
@@ -12,14 +14,17 @@ export function buildDelegationToolProviders(runtime: DelegationRuntime | undefi
     tools: [
       LocalToolHost.defineTool({
         name: 'delegate_task',
-        description: 'Run a bounded child agent task and return its summary.',
+        description: buildDelegateTaskDescription(runtime, profiles),
         inputSchema: {
           type: 'object',
           properties: {
-            label: { type: 'string' },
-            prompt: { type: 'string' },
+            label: { type: 'string', description: 'Short label for this subagent run.' },
+            prompt: { type: 'string', description: 'The task for the child agent.' },
             workspace: { type: 'string' },
-            model: { type: 'string' }
+            model: { type: 'string', description: 'Override the child model. Defaults to the profile model or server default.' },
+            profile: profileNames.length
+              ? { type: 'string', enum: profileNames, description: 'Subagent role to apply (model, preamble, tool policy).' }
+              : { type: 'string', description: 'Subagent role to apply (model, preamble, tool policy).' }
           },
           required: ['prompt'],
           additionalProperties: false
@@ -28,14 +33,14 @@ export function buildDelegationToolProviders(runtime: DelegationRuntime | undefi
         execute: async (args, context) => {
           const prompt = typeof args.prompt === 'string' ? args.prompt.trim() : ''
           if (!prompt) return { output: { error: 'prompt is required' }, isError: true }
-          const spawnIndex = (await runtime.diagnostics(context.threadId)).childRuns.length + 1
           const record = await runtime.runChild({
             parentThreadId: context.threadId,
             parentTurnId: context.turnId,
             label: typeof args.label === 'string' ? args.label : undefined,
             prompt,
             workspace: typeof args.workspace === 'string' ? args.workspace : context.workspace,
-            model: typeof args.model === 'string' ? args.model : context.model?.id,
+            ...(typeof args.model === 'string' ? { model: args.model } : {}),
+            ...(typeof args.profile === 'string' ? { profile: args.profile } : {}),
             signal: context.abortSignal
           })
           return {
@@ -45,9 +50,11 @@ export function buildDelegationToolProviders(runtime: DelegationRuntime | undefi
               summary: record.summary,
               error: record.error,
               usage: record.usage,
-              ...(spawnIndex > 1
-                ? { warning: `This is child agent spawn #${spawnIndex} for the thread. Spawn only when the extra prefix/cache cost is worth it.` }
-                : {})
+              ...(record.profile ? { profile: record.profile } : {}),
+              ...(record.toolPolicy ? { toolPolicy: record.toolPolicy } : {}),
+              ...(record.toolInvocations !== undefined ? { toolInvocations: record.toolInvocations } : {}),
+              ...(record.durationMs !== undefined ? { durationMs: record.durationMs } : {}),
+              ...(record.queuedMs ? { queuedMs: record.queuedMs } : {})
             },
             isError: record.status === 'failed' || record.status === 'aborted'
           }
@@ -55,4 +62,25 @@ export function buildDelegationToolProviders(runtime: DelegationRuntime | undefi
       })
     ]
   }]
+}
+
+function buildDelegateTaskDescription(
+  runtime: DelegationRuntime,
+  profiles: { name: string; toolPolicy: string; model?: string }[]
+): string {
+  const lines = [
+    'Run a bounded child agent task and return its summary.',
+    'Issue several delegate_task calls in one message to investigate in parallel; runs queue once the parallel budget is full.',
+    `Children default to the "${runtime.defaultToolPolicy}" tool policy (read-only children may only read/grep/find/ls and cannot edit, run shell, or delegate further).`
+  ]
+  if (profiles.length) {
+    const summary = profiles
+      .map((profile) => `${profile.name} (${profile.toolPolicy}${profile.model ? `, ${profile.model}` : ''})`)
+      .join('; ')
+    lines.push(`Available profiles: ${summary}.`)
+  }
+  if (runtime.defaultProfileName) {
+    lines.push(`Default profile when omitted: ${runtime.defaultProfileName}.`)
+  }
+  return lines.join(' ')
 }

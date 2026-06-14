@@ -91,12 +91,20 @@ export class FileMemoryStore implements MemoryStore {
     if (!this.options.config.enabled) return []
     const active = (await this.list({ workspace: input.workspace }))
       .filter((record) => !record.disabledAt)
-    return active
+    // User-scope memories are persistent identity facts (name, preferences,
+    // account) — small in number, high in value, and frequently queried by
+    // semantic prompts ("who am I?", "what do you know about me") that share
+    // zero keyword overlap with the stored content. Keyword retrieval will
+    // always miss them, so inject every active user memory unconditionally and
+    // reserve scored retrieval for the larger workspace/project pool.
+    const userMemories = active.filter((record) => record.scope === 'user')
+    const scored = active
+      .filter((record) => record.scope !== 'user')
       .map((record) => ({ record, score: scoreMemory(record, input.query) }))
       .filter((entry) => entry.score > 0)
       .sort((a, b) => b.score - a.score || b.record.updatedAt.localeCompare(a.record.updatedAt))
-      .slice(0, input.limit)
       .map((entry) => entry.record)
+    return [...userMemories, ...scored].slice(0, input.limit)
   }
 
   async diagnostics(): Promise<MemoryDiagnostics> {
@@ -145,16 +153,56 @@ export class FileMemoryStore implements MemoryStore {
 
 function inScope(record: MemoryRecord, workspace: string | undefined): boolean {
   if (record.scope === 'user') return true
-  if (record.scope === 'workspace') return Boolean(workspace && record.workspace === workspace)
+  if (record.scope === 'workspace') {
+    // Records created via the GUI may not carry a workspace (e.g. manually
+    // added before any thread ran). Treat a missing workspace as in-scope so
+    // they are still retrievable; otherwise require an exact match.
+    if (!record.workspace) return true
+    return Boolean(workspace && record.workspace === workspace)
+  }
   return true
 }
 
 function scoreMemory(record: MemoryRecord, query: string): number {
-  const words = new Set(query.toLowerCase().split(/[^a-z0-9_]+/).filter((word) => word.length > 2))
-  let score = 0
-  const text = `${record.content} ${record.tags.join(' ')}`.toLowerCase()
-  for (const word of words) {
-    if (text.includes(word)) score += 1
+  // Build n-gram fingerprints so matching works for both Latin words and CJK
+  // text. The previous implementation split on `[^a-z0-9_]+`, which treated
+  // every Chinese/Japanese/Korean character as a separator and produced an
+  // empty token set for CJK queries — memories were never retrieved.
+  const queryGrams = ngrams(query)
+  if (queryGrams.size === 0) return 0
+  const textGrams = ngrams(`${record.content} ${record.tags.join(' ')}`)
+  let overlap = 0
+  for (const gram of queryGrams) {
+    if (textGrams.has(gram)) overlap += 1
   }
-  return score * record.confidence
+  // Normalize by query coverage so long queries do not drown out short ones.
+  const coverage = overlap / queryGrams.size
+  return (overlap + coverage) * record.confidence
+}
+
+/**
+ * Produce a fingerprint of overlapping n-grams for a string. ASCII/Latin
+ * segments are tokenized on word boundaries and down to trigrams, while CJK
+ * runs are split into bigrams. Lower-cased, de-spaced. This keeps matching
+ * language-agnostic without pulling in a tokenizer dependency.
+ */
+function ngrams(input: string): Set<string> {
+  const grams = new Set<string>()
+  const normalized = input.toLowerCase()
+  // Pull out ASCII words (letters/digits/underscore) and CJK runs separately.
+  const asciiWords = normalized.match(/[a-z0-9_]{3,}/g) ?? []
+  for (const word of asciiWords) {
+    for (let i = 0; i + 3 <= word.length; i += 1) {
+      grams.add(word.slice(i, i + 3))
+    }
+    if (word.length < 3) grams.add(word)
+  }
+  const cjkRuns = normalized.match(/[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]+/g) ?? []
+  for (const run of cjkRuns) {
+    for (let i = 0; i + 2 <= run.length; i += 1) {
+      grams.add(run.slice(i, i + 2))
+    }
+    if (run.length < 2) grams.add(run)
+  }
+  return grams
 }

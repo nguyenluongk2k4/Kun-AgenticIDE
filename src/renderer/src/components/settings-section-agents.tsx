@@ -17,7 +17,7 @@ import {
   isKunRuntimeInsecure
 } from '@shared/app-settings'
 import type { GuiUpdateChannel } from '@shared/gui-update'
-import type { SkillRootId } from '../lib/skill-root-preference'
+import type { SkillRootListItem } from '@shared/kun-gui-api'
 import { Ban, FolderOpen, Loader2, RefreshCw, Settings, Trash2 } from 'lucide-react'
 import { GuiUpdateControl } from './settings-gui-update'
 import {
@@ -39,6 +39,11 @@ function statusPill(status: string | undefined): string {
   if (status === 'available') return 'border-emerald-400/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200'
   if (status === 'disabled') return 'border-ds-border-muted bg-ds-card text-ds-faint'
   return 'border-red-300/50 bg-red-500/10 text-red-700 dark:text-red-200'
+}
+
+function skillRootShortLabel(path: string): string {
+  const parts = path.split(/[\\/]+/).filter(Boolean)
+  return parts.slice(-2).join('/') || path
 }
 
 function compactList(values: unknown, empty: string): string {
@@ -179,10 +184,9 @@ export function AgentsSettingsSection({ ctx }: { ctx: Record<string, any> }): Re
     skillSectionRef,
     mcpSectionRef,
     permissionsSectionRef,
-    selectedSkillRoot,
-    skillRootOptions,
-    skillRootId,
-    setSkillRootId,
+    skillRoots,
+    skillRootsLoading,
+    toggleSkillRoot,
     skillNotice,
     openSkillRoot,
     openPlugins,
@@ -604,30 +608,64 @@ export function AgentsSettingsSection({ ctx }: { ctx: Record<string, any> }): Re
               <div ref={skillSectionRef} className="mt-6">
                 <SettingsCard title={t('skill')}>
                   <SettingRow
-                    title={t('skillsLocation')}
-                    description={t('skillsLocationDesc')}
+                    title={t('skillsDetectedDirs')}
+                    description={t('skillsDetectedDirsDesc')}
+                    wideControl
                     control={
-                      <select
-                        className={selectControlClass}
-                        value={selectedSkillRoot?.id ?? skillRootId}
-                        onChange={(event) => setSkillRootId(event.target.value as SkillRootId)}
-                      >
-                        {skillRootOptions.map((option: any) => (
-                          <option key={option.id} value={option.id} disabled={!option.available}>
-                            {option.available ? option.label : `${option.label} · ${tCommon('pluginSkillRootNeedsWorkspace')}`}
-                          </option>
-                        ))}
-                      </select>
-                    }
-                  />
-                  <SettingRow
-                    title={t('skillsPath')}
-                    description={t('skillsPathDesc')}
-                    control={
-                      <div className="w-full min-w-0 rounded-xl border border-ds-border bg-ds-card px-3 py-2 text-[13px] text-ds-muted shadow-sm">
-                        <code className="block break-all rounded-lg bg-ds-main/70 px-2 py-1 font-mono text-[12px] text-ds-ink">
-                          {selectedSkillRoot?.path || t('skillsRootUnavailable')}
-                        </code>
+                      <div className="flex w-full flex-col gap-2">
+                        {skillRootsLoading && skillRoots.length === 0 ? (
+                          <div className="rounded-xl border border-ds-border-muted bg-ds-main/40 px-3 py-3 text-[13px] text-ds-faint">
+                            {t('loading')}
+                          </div>
+                        ) : skillRoots.length === 0 ? (
+                          <div className="rounded-xl border border-ds-border-muted bg-ds-main/40 px-3 py-3 text-[13px] text-ds-faint">
+                            {t('skillsDetectedDirsEmpty')}
+                          </div>
+                        ) : (
+                          skillRoots.map((root: SkillRootListItem) => (
+                            <div
+                              key={`${root.id}:${root.path}`}
+                              className={`flex items-start justify-between gap-3 rounded-xl border px-3 py-2.5 shadow-sm ${
+                                root.enabled ? 'border-ds-border bg-ds-card' : 'border-ds-border-muted bg-ds-main/40'
+                              }`}
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <span className="text-[13px] font-medium text-ds-ink">
+                                    {root.labelKey ? tCommon(root.labelKey) : skillRootShortLabel(root.path)}
+                                  </span>
+                                  <span className="rounded-md border border-ds-border-muted bg-ds-main/50 px-1.5 py-0.5 text-[11px] font-medium text-ds-muted">
+                                    {root.scope === 'project' ? t('skillsScopeProject') : t('skillsScopeGlobal')}
+                                  </span>
+                                  {root.exists ? (
+                                    <span className="rounded-md border border-emerald-400/25 bg-emerald-500/10 px-1.5 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-200">
+                                      {t('skillsDirSkillCount', { count: root.skillCount })}
+                                    </span>
+                                  ) : (
+                                    <span className="rounded-md border border-ds-border-muted bg-ds-main/50 px-1.5 py-0.5 text-[11px] font-medium text-ds-faint">
+                                      {t('skillsDirNotFound')}
+                                    </span>
+                                  )}
+                                </div>
+                                <code className="mt-1 block break-all font-mono text-[12px] text-ds-muted">
+                                  {root.path}
+                                </code>
+                              </div>
+                              <div className="flex shrink-0 items-center gap-1.5 pt-0.5">
+                                <button
+                                  type="button"
+                                  onClick={() => void openSkillRoot(root.path)}
+                                  className="rounded-lg p-1.5 text-ds-muted transition hover:bg-ds-hover hover:text-ds-ink"
+                                  aria-label={t('skillsOpenRoot')}
+                                  title={t('skillsOpenRoot')}
+                                >
+                                  <FolderOpen className="h-4 w-4" strokeWidth={1.8} />
+                                </button>
+                                <Toggle checked={root.enabled} onChange={(value) => toggleSkillRoot(root, value)} />
+                              </div>
+                            </div>
+                          ))
+                        )}
                       </div>
                     }
                   />
@@ -648,7 +686,7 @@ export function AgentsSettingsSection({ ctx }: { ctx: Record<string, any> }): Re
                           })
                         }
                         spellCheck={false}
-                        placeholder={selectedSkillRoot?.path || '~/.agents/skills'}
+                        placeholder={'~/.agents/skills'}
                         className="min-h-24 w-full rounded-2xl border border-ds-border bg-ds-card px-4 py-3 font-mono text-[13px] leading-6 text-ds-ink shadow-sm focus:border-accent/40 focus:outline-none focus:ring-1 focus:ring-accent/30"
                       />
                     }
@@ -660,14 +698,6 @@ export function AgentsSettingsSection({ ctx }: { ctx: Record<string, any> }): Re
                     control={
                       <div className="flex w-full flex-col gap-3">
                         <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            onClick={() => void openSkillRoot()}
-                            className="inline-flex items-center gap-1.5 rounded-xl border border-ds-border bg-ds-card px-3 py-2 text-[13px] font-medium text-ds-ink shadow-sm transition hover:bg-ds-hover"
-                          >
-                            <FolderOpen className="h-4 w-4" />
-                            {t('skillsOpenRoot')}
-                          </button>
                           <button
                             type="button"
                             onClick={() => openPlugins()}
@@ -1260,6 +1290,15 @@ export function AgentsSettingsSection({ ctx }: { ctx: Record<string, any> }): Re
                           <div className="rounded-xl border border-ds-border-muted bg-ds-main/40 px-3 py-2">
                             Web: <span className="font-mono text-ds-ink">{runtimeInfo?.capabilities?.web?.provider ?? 'none'}</span>
                           </div>
+                          {runtimeInfo?.capabilities?.subagents?.enabled ? (
+                            <div className="rounded-xl border border-ds-border-muted bg-ds-main/40 px-3 py-2">
+                              Subagents: <span className="font-mono text-ds-ink">
+                                {runtimeInfo?.capabilities?.subagents?.maxParallel ?? 0}∥ · {runtimeInfo?.capabilities?.subagents?.maxChildRuns ?? 0} max
+                                {runtimeInfo?.capabilities?.subagents?.defaultToolPolicy ? ` · ${runtimeInfo.capabilities.subagents.defaultToolPolicy}` : ''}
+                                {runtimeInfo?.capabilities?.subagents?.profiles?.length ? ` · ${runtimeInfo.capabilities.subagents.profiles.length} profile(s)` : ''}
+                              </span>
+                            </div>
+                          ) : null}
                         </div>
                         <div className="flex flex-wrap items-center gap-2">
                           <button

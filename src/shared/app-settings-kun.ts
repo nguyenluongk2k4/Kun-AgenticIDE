@@ -136,7 +136,8 @@ export function defaultKunRuntimeSettings(
     textToSpeech: defaultKunTextToSpeechSettings(),
     musicGeneration: defaultKunMusicGenerationSettings(),
     videoGeneration: defaultKunVideoGenerationSettings(),
-    modelProfiles: {}
+    modelProfiles: {},
+    memoryEnabled: false
   }
 }
 
@@ -386,7 +387,8 @@ export function mergeKunRuntimeSettings(
     textToSpeech: nextTextToSpeech,
     musicGeneration: nextMusicGeneration,
     videoGeneration: nextVideoGeneration,
-    modelProfiles: nextModelProfiles
+    modelProfiles: nextModelProfiles,
+    memoryEnabled: patch?.memoryEnabled ?? current.memoryEnabled ?? false
   }
 }
 

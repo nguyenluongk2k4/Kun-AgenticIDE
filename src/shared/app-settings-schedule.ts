@@ -61,7 +61,8 @@ export function defaultScheduleSettings(): ScheduleSettingsV1 {
     promptPrefix: '',
     skills: {
       defaultNames: [],
-      extraDirs: []
+      extraDirs: [],
+      disabledDirs: []
     },
     keepAwake: false,
     internal: {
@@ -90,7 +91,8 @@ export function normalizeScheduleSettings(
     promptPrefix: typeof source.promptPrefix === 'string' ? source.promptPrefix : '',
     skills: {
       defaultNames: compactStrings(skills.defaultNames),
-      extraDirs: compactStrings(skills.extraDirs)
+      extraDirs: compactStrings(skills.extraDirs),
+      disabledDirs: compactStrings(skills.disabledDirs)
     },
     keepAwake: normalizeBoolean(source.keepAwake, defaults.keepAwake),
     internal: {

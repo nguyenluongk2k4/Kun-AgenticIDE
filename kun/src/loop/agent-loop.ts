@@ -63,7 +63,7 @@ import {
   type TokenEconomyConfig
 } from './token-economy.js'
 import { applyRequestHistoryHygiene } from './request-history-hygiene.js'
-import { estimateModelRequestInputTokens } from './model-request-estimator.js'
+import { estimateModelRequestInputTokens, estimateRequestOverheadTokens } from './model-request-estimator.js'
 import {
   recentAutoRouterContext,
   resolveAutoModelRoute,
@@ -78,6 +78,7 @@ import { TODO_LIST_TOOL_NAME, TODO_WRITE_TOOL_NAME } from '../adapters/tool/todo
 import { shellRuntimeInstruction } from '../adapters/tool/builtin-tool-utils.js'
 
 const PARALLEL_READ_ONLY_TOOL_NAMES = new Set(['read', 'grep', 'find', 'ls'])
+const DELEGATE_TASK_TOOL_NAME = 'delegate_task'
 const MAX_PARALLEL_TOOL_CALLS = 3
 const MAX_TURN_MODEL_STEPS = 64
 const MAX_TOOL_CATALOG_SNAPSHOTS = 256
@@ -355,6 +356,23 @@ function allowedToolNamesWithGuiStateTools(
   return [...next]
 }
 
+/**
+ * Intersect an optional allow-list with a hard-forced allow-list. Used to
+ * clamp a subagent loop to read-only tools: the forced list wins, but any
+ * narrower skill-imposed list is preserved. Returns the forced list when no
+ * base restriction exists, and leaves the base untouched when nothing is
+ * forced (the main agent path).
+ */
+function intersectAllowedToolNames(
+  base: readonly string[] | undefined,
+  forced: readonly string[] | undefined
+): readonly string[] | undefined {
+  if (!forced) return base
+  if (!base) return [...forced]
+  const forcedSet = new Set(forced)
+  return base.filter((name) => forcedSet.has(name))
+}
+
 export type AgentLoopOptions = {
   threadStore: ThreadStore
   sessionStore: SessionStore
@@ -382,6 +400,12 @@ export type AgentLoopOptions = {
   toolArgumentRepair?: {
     maxStringBytes?: number
   }
+  /**
+   * Hard allow-list intersected into every tool context for this loop. Used
+   * by read-only subagents to clamp the inherited tool host to investigation
+   * tools — enforced at both the schema (listTools) and execute layers.
+   */
+  forcedAllowedToolNames?: readonly string[]
   /**
    * Lifecycle hooks (UserPromptSubmit, TurnStart, TurnEnd, PreCompact).
    * Tool phases are handled by the tool host; the loop ignores them.
@@ -424,6 +448,8 @@ export class AgentLoop {
   private readonly opts: AgentLoopOptions
   private readonly autoModelRoutes = new Map<string, AutoModelRouteSelection>()
   private readonly promptTokenPressure = new Map<string, { model: string; promptTokens: number }>()
+  /** Threads for which a one-time pressure hydration from persisted usage was already attempted. */
+  private readonly hydratedPressureThreads = new Set<string>()
   private readonly toolStormBreakers = new Map<string, ToolStormBreaker>()
   private readonly toolCatalogSnapshots = new Map<string, ToolCatalogSnapshot>()
   private readonly lastNoToolTextByTurn = new Map<string, string>()
@@ -848,9 +874,12 @@ export class AgentLoop {
     const activeTodoInstruction = planTurnActive
       ? null
       : todoContinuationInstruction(thread?.todos)
-    const allowedToolNames = allowedToolNamesWithGuiStateTools(
-      skillResolution.allowedToolNames,
-      activeGoalInstruction !== null
+    const allowedToolNames = intersectAllowedToolNames(
+      allowedToolNamesWithGuiStateTools(
+        skillResolution.allowedToolNames,
+        activeGoalInstruction !== null
+      ),
+      this.opts.forcedAllowedToolNames
     )
     // IM/headless turns run without the user-input gate; the tools key
     // their advertisement off `awaitUserInput`, so omitting it hides
@@ -933,7 +962,11 @@ export class AgentLoop {
       createPlanSatisfied,
       stepIndex
     })
-    const history = await this.compactIfNeeded(items, model, signal, { threadId, turnId })
+    const history = await this.compactIfNeeded(items, model, signal, {
+      threadId,
+      turnId,
+      toolSpecs: effectiveToolSpecs
+    })
     if (signal.aborted) return 'aborted'
     await this.recordPipelineStage(threadId, turnId, 'input_compressed', {
       historyItems: history.length
@@ -977,7 +1010,9 @@ export class AgentLoop {
     const economyRequest = applyTokenEconomyToRequest(baseRequest, tokenEconomy)
     const request: ModelRequest = {
       ...economyRequest,
-      history: applyRequestHistoryHygiene(economyRequest.history, tokenEconomy.historyHygiene)
+      history: applyRequestHistoryHygiene(economyRequest.history, tokenEconomy.historyHygiene, {
+        currentTurnId: turnId
+      })
     }
     if (tokenEconomy.enabled) {
       await this.recordTokenEconomySavings({
@@ -995,6 +1030,38 @@ export class AgentLoop {
     const completedToolCalls: ToolCallLike[] = []
     let stopReason: 'stop' | 'tool_calls' | 'length' | 'error' = 'stop'
     const modelClientDiagnostics = this.modelClientDiagnostics()
+    let persistedReasoning = false
+    let persistedText = false
+    const persistAccumulatedResponse = async (): Promise<void> => {
+      if (!persistedReasoning && reasoningAccumulator.value) {
+        persistedReasoning = true
+        const itemId = reasoningItemId || this.opts.ids.next('item_reasoning')
+        await this.opts.turns.applyItem(
+          threadId,
+          makeAssistantReasoningItem({
+            id: itemId,
+            turnId,
+            threadId,
+            text: reasoningAccumulator.value,
+            status: 'completed'
+          })
+        )
+      }
+      if (!persistedText && textAccumulator.value) {
+        persistedText = true
+        const itemId = textItemId || this.opts.ids.next('item_text')
+        await this.opts.turns.applyItem(
+          threadId,
+          makeAssistantTextItem({
+            id: itemId,
+            turnId,
+            threadId,
+            text: textAccumulator.value,
+            status: 'completed'
+          })
+        )
+      }
+    }
     await this.recordPipelineStage(threadId, turnId, 'pre_send', {
       model: request.model,
       ...modelClientDiagnostics,
@@ -1013,7 +1080,10 @@ export class AgentLoop {
       ...modelClientDiagnostics
     })
     for await (const chunk of this.opts.model.stream(request)) {
-      if (signal.aborted) return 'aborted'
+      if (signal.aborted) {
+        await persistAccumulatedResponse()
+        return 'aborted'
+      }
       switch (chunk.kind) {
         case 'assistant_text_delta':
           textItemId ||= this.opts.ids.next('item_text')
@@ -1128,36 +1198,15 @@ export class AgentLoop {
           break
       }
     }
+    if (signal.aborted) {
+      await persistAccumulatedResponse()
+      return 'aborted'
+    }
     await this.recordPipelineStage(threadId, turnId, 'response_received', {
       stopReason,
       toolCallCount: completedToolCalls.length
     })
-    if (reasoningAccumulator.value) {
-      const itemId = reasoningItemId || this.opts.ids.next('item_reasoning')
-      await this.opts.turns.applyItem(
-        threadId,
-        makeAssistantReasoningItem({
-          id: itemId,
-          turnId,
-          threadId,
-          text: reasoningAccumulator.value,
-          status: 'completed'
-        })
-      )
-    }
-    if (textAccumulator.value) {
-      const itemId = textItemId || this.opts.ids.next('item_text')
-      await this.opts.turns.applyItem(
-        threadId,
-        makeAssistantTextItem({
-          id: itemId,
-          turnId,
-          threadId,
-          text: textAccumulator.value,
-          status: 'completed'
-        })
-      )
-    }
+    await persistAccumulatedResponse()
     if (stopReason === 'error') return 'failed'
     if (completedToolCalls.length === 0) {
       if (request.requiredToolName) {
@@ -1371,14 +1420,20 @@ export class AgentLoop {
         continue
       }
 
+      // Keep batches homogeneous: delegation children fan out together (the
+      // runtime semaphore bounds real concurrency), while built-in read-only
+      // tools stay capped at MAX_PARALLEL_TOOL_CALLS.
+      const headIsDelegation = this.isParallelDelegationCall(call, input.toolProviderKinds)
+      const batchCap = headIsDelegation ? input.calls.length : MAX_PARALLEL_TOOL_CALLS
       const batch: ToolCallLike[] = [call]
       index += 1
       let suppressedAfterBatch: { call: ToolCallLike; reason?: string } | undefined
 
-      while (batch.length < MAX_PARALLEL_TOOL_CALLS && index < input.calls.length) {
+      while (batch.length < batchCap && index < input.calls.length) {
         const next = input.calls[index]
         if (!next) break
         if (!this.isParallelSafeToolCall(next, input.approvalPolicy, input.toolProviderKinds)) break
+        if (this.isParallelDelegationCall(next, input.toolProviderKinds) !== headIsDelegation) break
 
         const nextStorm = this.toolStormBreakers.get(input.turnId)?.inspect(next)
         if (nextStorm?.suppress) {
@@ -1428,10 +1483,25 @@ export class AgentLoop {
     approvalPolicy: ToolHostContext['approvalPolicy'],
     toolProviderKinds: ReadonlyMap<string, ToolProviderKind | undefined>
   ): boolean {
+    // Untrusted/never prompt on every tool, so parallel fan-out is unsafe.
+    if (approvalPolicy === 'untrusted' || approvalPolicy === 'never') return false
+    // Delegated children are isolated runs; multiple in one assistant message
+    // are independent and safe to fan out. The delegation runtime caps real
+    // concurrency at maxParallel and queues the overflow.
+    if (this.isParallelDelegationCall(call, toolProviderKinds)) return true
     if (!PARALLEL_READ_ONLY_TOOL_NAMES.has(call.toolName)) return false
     if (call.toolKind && call.toolKind !== 'tool_call') return false
-    if (approvalPolicy === 'untrusted' || approvalPolicy === 'never') return false
     return toolProviderKinds.get(call.toolName) === 'built-in'
+  }
+
+  private isParallelDelegationCall(
+    call: ToolCallLike,
+    toolProviderKinds: ReadonlyMap<string, ToolProviderKind | undefined>
+  ): boolean {
+    return (
+      call.toolName === DELEGATE_TASK_TOOL_NAME &&
+      toolProviderKinds.get(call.toolName) === 'delegation'
+    )
   }
 
   private createToolContext(input: {
@@ -1788,11 +1858,25 @@ export class AgentLoop {
     items: TurnItem[],
     model: string,
     signal: AbortSignal,
-    context: { threadId: string; turnId: string }
+    context: { threadId: string; turnId: string; toolSpecs?: readonly ModelToolSpec[] }
   ): Promise<TurnItem[]> {
+    // Restore the accurate provider token count after a process restart,
+    // when the in-memory pressure map is empty. Without this the next
+    // line falls back to the item-only estimator, which under-counts and
+    // can silently skip compaction until the context overruns the window.
+    await this.hydratePromptPressureIfCold(context.threadId, model)
     const pressure = this.consumePromptPressure(context.threadId, model)
     const thresholdModel = pressure?.model || model
-    const plan = this.opts.compactor.planCompaction(items, { model: thresholdModel, promptTokens: pressure?.promptTokens })
+    const overheadTokens = estimateRequestOverheadTokens({
+      systemPrompt: this.opts.prefix.systemPrompt,
+      prefix: this.opts.prefix.fewShots,
+      tools: context.toolSpecs
+    })
+    const plan = this.opts.compactor.planCompaction(items, {
+      model: thresholdModel,
+      promptTokens: pressure?.promptTokens,
+      overheadTokens
+    })
     if (!plan) return items
     const threadId = context.threadId
     const turnId = context.turnId
@@ -2015,6 +2099,42 @@ export class AgentLoop {
     const current = this.promptTokenPressure.get(threadId)
     if (current && current.promptTokens >= promptTokens) return
     this.promptTokenPressure.set(threadId, { model, promptTokens })
+  }
+
+  /**
+   * Seed `promptTokenPressure` from persisted usage the first time a thread
+   * is touched in this process. The pressure map is in-memory only, so after
+   * a restart the compaction trigger would otherwise rely on the item-only
+   * estimator (which omits the system prompt and tool schemas) and could
+   * skip compaction for an already-oversized thread. `loadUsageRecords`
+   * returns per-request deltas ordered oldest-first, so the last positive
+   * entry is the most recent request's prompt size — the best available
+   * proxy for the current context pressure. Best-effort: any failure leaves
+   * the estimator (plus overhead floor) as the fallback.
+   */
+  private async hydratePromptPressureIfCold(threadId: string, fallbackModel: string): Promise<void> {
+    if (!threadId) return
+    if (this.promptTokenPressure.has(threadId)) return
+    if (this.hydratedPressureThreads.has(threadId)) return
+    this.hydratedPressureThreads.add(threadId)
+    const loadUsageRecords = this.opts.sessionStore.loadUsageRecords
+    if (typeof loadUsageRecords !== 'function') return
+    try {
+      const records = await loadUsageRecords.call(this.opts.sessionStore, { threadId })
+      let restored: { model: string; promptTokens: number } | undefined
+      for (const record of records) {
+        if (record.threadId !== threadId) continue
+        const promptTokens = Math.floor(record.usage?.promptTokens ?? 0)
+        if (promptTokens > 0) {
+          restored = { model: record.model || fallbackModel, promptTokens }
+        }
+      }
+      if (restored && !this.promptTokenPressure.has(threadId)) {
+        this.promptTokenPressure.set(threadId, restored)
+      }
+    } catch {
+      // Best-effort restore; the estimator + overhead floor still applies.
+    }
   }
 
   private async recordToolCatalogDrift(input: {

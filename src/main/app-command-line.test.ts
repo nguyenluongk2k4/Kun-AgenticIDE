@@ -25,9 +25,10 @@ describe('app command line bootstrap', () => {
 
     configureLinuxWaylandImeSwitches('linux')
 
-    expect(appendSwitch).toHaveBeenCalledTimes(2)
+    expect(appendSwitch).toHaveBeenCalledTimes(3)
     expect(appendSwitch).toHaveBeenNthCalledWith(1, 'ozone-platform-hint', 'auto')
     expect(appendSwitch).toHaveBeenNthCalledWith(2, 'enable-wayland-ime')
+    expect(appendSwitch).toHaveBeenNthCalledWith(3, 'wayland-text-input-version', '3')
   })
 
   it('keeps user-provided switches unchanged', async () => {
@@ -36,8 +37,9 @@ describe('app command line bootstrap', () => {
 
     configureLinuxWaylandImeSwitches('linux')
 
-    expect(appendSwitch).toHaveBeenCalledTimes(1)
-    expect(appendSwitch).toHaveBeenCalledWith('enable-wayland-ime')
+    expect(appendSwitch).toHaveBeenCalledTimes(2)
+    expect(appendSwitch).toHaveBeenNthCalledWith(1, 'enable-wayland-ime')
+    expect(appendSwitch).toHaveBeenNthCalledWith(2, 'wayland-text-input-version', '3')
   })
 
   it('does not add Wayland IME switches on other platforms', async () => {

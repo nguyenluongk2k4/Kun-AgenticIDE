@@ -122,6 +122,9 @@ export function FloatingComposerExecutionPicker({
           <div className="px-2 pb-1 pt-1 text-[11px] font-bold uppercase tracking-[0.08em] text-ds-faint">
             {t('composerAccessShort')}
           </div>
+          <div className="px-2 pb-1 text-[11px] leading-snug text-ds-faint">
+            {t('composerAccessCommandsHint')}
+          </div>
           {SANDBOX_OPTIONS.map((option) => (
             <ExecutionRow
               key={option.value}

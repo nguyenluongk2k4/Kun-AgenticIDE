@@ -181,13 +181,54 @@ export const SkillsCapabilityConfig = CapabilityToggleConfig.extend({
 }).strict()
 export type SkillsCapabilityConfig = z.infer<typeof SkillsCapabilityConfig>
 
+export const SubagentToolPolicy = z.enum(['readOnly', 'inherit'])
+export type SubagentToolPolicy = z.infer<typeof SubagentToolPolicy>
+
+/**
+ * Tools a `readOnly` subagent may call. The list is enforced twice: the
+ * child loop advertises only these names (schema filter) and the
+ * capability registry re-checks them at execute time (backstop). Keep it
+ * to side-effect-free investigation tools — no bash/edit/write, and no
+ * nested `delegate_task`.
+ */
+export const SUBAGENT_READ_ONLY_TOOL_NAMES = ['read', 'grep', 'find', 'ls'] as const
+
+export const SubagentProfileConfig = z
+  .object({
+    /** Overrides the child model for this role (falls back to the server default). */
+    model: z.string().min(1).optional(),
+    /** Short instruction prepended to the delegated task prompt. */
+    promptPreamble: z.string().min(1).optional(),
+    /** Whether the child is restricted to read-only tools or inherits the full set. */
+    toolPolicy: SubagentToolPolicy.default('readOnly')
+  })
+  .strict()
+export type SubagentProfileConfig = z.infer<typeof SubagentProfileConfig>
+
 export const SubagentsCapabilityConfig = CapabilityToggleConfig.extend({
+  /** Max children running at once; extra spawns queue instead of erroring. */
   maxParallel: z.number().int().nonnegative().default(0),
+  /** Hard cap on total children per parent thread. */
   maxChildRuns: z.number().int().nonnegative().default(0),
+  /** Tool policy applied to children that do not resolve a profile. */
+  defaultToolPolicy: SubagentToolPolicy.default('readOnly'),
+  /** Profile chosen when `delegate_task` omits an explicit profile. */
+  defaultProfile: z.string().min(1).optional(),
+  /** Named subagent roles (e.g. researcher/reviewer/verifier). */
+  profiles: z.record(z.string().min(1), SubagentProfileConfig).default({}),
   // Accept the removed legacy field so old configs keep loading, but ignore it.
   defaultStepLimit: z.number().int().positive().optional()
 })
   .strict()
+  .superRefine((config, ctx) => {
+    if (config.defaultProfile && !(config.defaultProfile in config.profiles)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['defaultProfile'],
+        message: `defaultProfile "${config.defaultProfile}" is not defined in profiles`
+      })
+    }
+  })
   .transform(({ defaultStepLimit: _legacyDefaultStepLimit, ...config }) => config)
 export type SubagentsCapabilityConfig = z.output<typeof SubagentsCapabilityConfig>
 
@@ -322,7 +363,20 @@ export const RuntimeCapabilityManifest = z
     }).strict(),
     subagents: RuntimeCapabilityState.extend({
       maxParallel: z.number().int().nonnegative(),
-      maxChildRuns: z.number().int().nonnegative()
+      maxChildRuns: z.number().int().nonnegative(),
+      defaultToolPolicy: SubagentToolPolicy,
+      defaultProfile: z.string().optional(),
+      profiles: z
+        .array(
+          z
+            .object({
+              name: z.string().min(1),
+              model: z.string().optional(),
+              toolPolicy: SubagentToolPolicy
+            })
+            .strict()
+        )
+        .default([])
     }).strict(),
     attachments: RuntimeCapabilityState.extend({
       maxImageBytes: z.number().int().positive(),
@@ -468,7 +522,14 @@ export function buildRuntimeCapabilityManifest(input: {
         input.subagents?.reason ?? 'subagent runtime is unavailable'
       ),
       maxParallel: config.subagents.maxParallel,
-      maxChildRuns: config.subagents.maxChildRuns
+      maxChildRuns: config.subagents.maxChildRuns,
+      defaultToolPolicy: config.subagents.defaultToolPolicy,
+      ...(config.subagents.defaultProfile ? { defaultProfile: config.subagents.defaultProfile } : {}),
+      profiles: Object.entries(config.subagents.profiles).map(([name, profile]) => ({
+        name,
+        ...(profile.model ? { model: profile.model } : {}),
+        toolPolicy: profile.toolPolicy
+      }))
     },
     attachments: {
       ...providerCapabilityState(

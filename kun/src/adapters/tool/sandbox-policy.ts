@@ -52,8 +52,8 @@ export function sandboxBlockForTool(
       code: 'sandbox_command_blocked',
       message:
         mode === 'read-only'
-          ? `tool ${tool.name} is blocked by the read-only sandbox`
-          : `tool ${tool.name} is blocked because ${mode} cannot sandbox host shell commands`
+          ? `tool ${tool.name} is blocked by the read-only sandbox. To run terminal commands, set the sandbox mode to "danger-full-access" (Full access) in Settings → Agents.`
+          : `tool ${tool.name} is blocked because the "${mode}" sandbox mode does not run host shell commands. To enable terminal commands, set the sandbox mode to "danger-full-access" (Full access) in Settings → Agents.`
     }
   }
 

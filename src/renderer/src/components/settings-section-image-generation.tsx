@@ -85,8 +85,10 @@ export function ImageGenerationSettingsSection({ ctx }: { ctx: Record<string, an
                     const nextProvider = imageProviders.find((item: { id: string }) => item.id === providerId)
                     updateImageGeneration({
                       providerId,
-                      baseUrl: providerId === CUSTOM_IMAGE_GENERATION_PROVIDER_ID ? imageGeneration.baseUrl : '',
-                      apiKey: providerId === CUSTOM_IMAGE_GENERATION_PROVIDER_ID ? imageGeneration.apiKey : '',
+                      // 不要清空自定义 baseUrl/apiKey:选中供应商时运行时由
+                      // resolveKunImageGenerationSettings 用供应商凭据覆盖,切回“自定义图片 API”
+                      // 时需原样保留这里的自定义值。此前这里把它们清成空串,一旦选过供应商,
+                      // 自定义密钥就被永久写空丢失。
                       protocol: providerId === CUSTOM_IMAGE_GENERATION_PROVIDER_ID
                         ? imageGeneration.protocol
                         : nextProvider?.image?.protocol ?? DEFAULT_IMAGE_GENERATION_PROTOCOL,

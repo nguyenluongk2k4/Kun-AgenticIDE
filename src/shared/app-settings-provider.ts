@@ -758,6 +758,11 @@ export function resolveKunVideoGenerationSettings(settings: AppSettingsV1): KunV
   }
 }
 
+export function resolveKunMemoryEnabled(settings: AppSettingsV1): boolean {
+  const runtime = getKunRuntimeSettings(settings)
+  return runtime.memoryEnabled ?? false
+}
+
 function resolveProviderCapabilityModel(configuredModel: string, providerModels: readonly string[]): string {
   const model = configuredModel.trim()
   if (!model) return providerModels[0] ?? ''
@@ -835,7 +840,8 @@ export function resolveKunRuntimeSettings(settings: AppSettingsV1): KunRuntimeSe
     textToSpeech: resolveKunTextToSpeechSettings(settings),
     musicGeneration: resolveKunMusicGenerationSettings(settings),
     videoGeneration: resolveKunVideoGenerationSettings(settings),
-    modelProfiles: modelProviderModelProfilesForSettings(settings)
+    modelProfiles: modelProviderModelProfilesForSettings(settings),
+    memoryEnabled: resolveKunMemoryEnabled(settings)
   }
 }
 

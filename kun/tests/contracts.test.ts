@@ -518,6 +518,55 @@ describe('cli', () => {
     expect('defaultStepLimit' in config.subagents).toBe(false)
   })
 
+  it('parses subagent profiles and defaults the tool policy to read-only', () => {
+    const config = KunCapabilitiesConfig.parse({
+      subagents: {
+        enabled: true,
+        maxParallel: 3,
+        maxChildRuns: 10,
+        defaultProfile: 'reviewer',
+        profiles: {
+          reviewer: { model: 'deepseek-v4-pro', promptPreamble: 'Review for bugs.', toolPolicy: 'readOnly' },
+          fixer: { toolPolicy: 'inherit' }
+        }
+      }
+    })
+    expect(config.subagents.defaultToolPolicy).toBe('readOnly')
+    expect(config.subagents.defaultProfile).toBe('reviewer')
+    expect(config.subagents.profiles.reviewer).toMatchObject({ model: 'deepseek-v4-pro', toolPolicy: 'readOnly' })
+    // Profiles default toolPolicy to readOnly when omitted.
+    expect(config.subagents.profiles.fixer.toolPolicy).toBe('inherit')
+  })
+
+  it('rejects a defaultProfile that is not defined in profiles', () => {
+    expect(() => KunCapabilitiesConfig.parse({
+      subagents: { enabled: true, maxParallel: 1, maxChildRuns: 1, defaultProfile: 'ghost' }
+    })).toThrow(/defaultProfile/)
+  })
+
+  it('surfaces subagent profiles and policy in the runtime capability manifest', () => {
+    const manifest = buildRuntimeCapabilityManifest({
+      model: modelCapabilitiesForModel('deepseek-chat'),
+      config: KunCapabilitiesConfig.parse({
+        subagents: {
+          enabled: true,
+          maxParallel: 2,
+          maxChildRuns: 6,
+          defaultProfile: 'reviewer',
+          profiles: { reviewer: { model: 'deepseek-v4-pro', toolPolicy: 'readOnly' } }
+        }
+      }),
+      subagents: { available: true }
+    })
+    expect(manifest.subagents).toMatchObject({
+      maxParallel: 2,
+      maxChildRuns: 6,
+      defaultToolPolicy: 'readOnly',
+      defaultProfile: 'reviewer',
+      profiles: [{ name: 'reviewer', model: 'deepseek-v4-pro', toolPolicy: 'readOnly' }]
+    })
+  })
+
   it('resolves model capability fields from configured profiles', () => {
     const profiles = modelContextProfilesFromConfig({
       models: {

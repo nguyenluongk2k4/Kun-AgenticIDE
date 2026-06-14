@@ -74,6 +74,8 @@ export function makeHarness(
   options: {
     compactor?: ContextCompactor
     tools?: LocalTool[]
+    /** Pre-built tool host (e.g. with a delegation-kind provider). Overrides `tools`. */
+    toolHost?: LocalToolHost
     skillRuntime?: SkillRuntime
     attachmentStore?: AttachmentStore
     memoryStore?: MemoryStore
@@ -96,7 +98,7 @@ export function makeHarness(
   const inflight = new InflightTracker()
   const steering = new SteeringQueue()
   const compactor = options.compactor ?? new ContextCompactor({ softThreshold: 64, hardThreshold: 128 })
-  const toolHost = new LocalToolHost({
+  const toolHost = options.toolHost ?? new LocalToolHost({
     tools: options.tools ?? defaultLocalTools,
     ...(options.hooks ? { hooks: options.hooks } : {})
   })

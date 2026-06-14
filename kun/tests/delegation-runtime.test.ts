@@ -95,32 +95,145 @@ describe('DelegationRuntime', () => {
     }
   })
 
-  it('warns when delegate_task is spawned repeatedly in one parent thread', async () => {
-    const runtime = createRuntime()
-    const host = new LocalToolHost({
-      registry: new CapabilityRegistry(buildDelegationToolProviders(runtime))
+  it('caps concurrency at maxParallel and queues the overflow instead of erroring', async () => {
+    const gate = deferred<void>()
+    let active = 0
+    let maxObservedActive = 0
+    const runtime = createRuntime({
+      maxParallel: 2,
+      maxChildRuns: 10,
+      executor: async ({ prompt }) => {
+        active += 1
+        maxObservedActive = Math.max(maxObservedActive, active)
+        await gate.promise
+        active -= 1
+        return { summary: `done: ${prompt}` }
+      }
     })
-    const context = {
-      threadId: 'thr_1',
-      turnId: 'turn_1',
-      workspace: '/tmp/ws',
-      approvalPolicy: 'auto' as const,
-      abortSignal: new AbortController().signal,
-      awaitApproval: async () => 'allow' as const
-    }
-    await host.execute({
-      callId: 'call_1',
-      toolName: 'delegate_task',
-      arguments: { prompt: 'first' }
-    }, context)
-    const second = await host.execute({
-      callId: 'call_2',
-      toolName: 'delegate_task',
-      arguments: { prompt: 'second' }
-    }, context)
+    const signal = new AbortController().signal
+    const runs = [0, 1, 2, 3].map((index) =>
+      runtime.runChild({ parentThreadId: 'thr_1', parentTurnId: 'turn_1', prompt: `p${index}`, signal })
+    )
+    // Two children start; the other two wait on a parallel slot.
+    await waitFor(() => maxObservedActive >= 2)
+    expect(active).toBe(2)
+    gate.resolve()
+    const results = await Promise.all(runs)
+    expect(results.every((record) => record.status === 'completed')).toBe(true)
+    expect(maxObservedActive).toBe(2)
+    expect((await runtime.diagnostics('thr_1')).childRuns).toHaveLength(4)
+  })
 
-    expect(second.item.kind === 'tool_result' ? second.item.output : {}).toMatchObject({
-      warning: expect.stringContaining('spawn #2')
+  it('marks a child aborted while it is still queued', async () => {
+    const gate = deferred<void>()
+    const controller = new AbortController()
+    const runtime = createRuntime({
+      maxParallel: 1,
+      executor: async () => {
+        await gate.promise
+        return { summary: 'blocking' }
+      }
+    })
+    // Drive the only slot to a confirmed running state before enqueuing the
+    // second child, so the abort target is deterministically the queued one.
+    const blocking = runtime.runChild({ parentThreadId: 'thr_1', parentTurnId: 'turn_1', prompt: 'hold', signal: new AbortController().signal })
+    await waitFor(async () => (await runtime.diagnostics('thr_1')).childRuns.some((run) => run.status === 'running'))
+    const queued = runtime.runChild({ parentThreadId: 'thr_1', parentTurnId: 'turn_1', prompt: 'wait', signal: controller.signal })
+    await waitFor(async () => (await runtime.diagnostics('thr_1')).childRuns.some((run) => run.status === 'queued'))
+    controller.abort()
+    await expect(queued).resolves.toMatchObject({ status: 'aborted' })
+    gate.resolve()
+    await expect(blocking).resolves.toMatchObject({ status: 'completed' })
+  })
+
+  it('resolves a profile to model, preamble, and tool policy', async () => {
+    const seen: Array<{ model?: string; promptPreamble?: string; toolPolicy: string }> = []
+    const runtime = createRuntime({
+      defaultProfile: 'reviewer',
+      profiles: {
+        reviewer: { model: 'deepseek-v4-pro', promptPreamble: 'Review for bugs.', toolPolicy: 'readOnly' }
+      },
+      executor: async (input) => {
+        seen.push({ model: input.model, promptPreamble: input.promptPreamble, toolPolicy: input.toolPolicy })
+        return { summary: 'reviewed', toolInvocations: 2, prefixReused: true, inheritedHistoryItems: 0 }
+      }
+    })
+    const record = await runtime.runChild({
+      parentThreadId: 'thr_1',
+      parentTurnId: 'turn_1',
+      prompt: 'check the diff',
+      signal: new AbortController().signal
+    })
+    expect(seen[0]).toMatchObject({ model: 'deepseek-v4-pro', promptPreamble: 'Review for bugs.', toolPolicy: 'readOnly' })
+    expect(record).toMatchObject({
+      profile: 'reviewer',
+      toolPolicy: 'readOnly',
+      model: 'deepseek-v4-pro',
+      toolInvocations: 2,
+      prefixReused: true,
+      inheritedHistoryItems: 0
+    })
+  })
+
+  it('rejects an unknown profile name', async () => {
+    const runtime = createRuntime({ profiles: { reviewer: { toolPolicy: 'readOnly' } } })
+    await expect(runtime.runChild({
+      parentThreadId: 'thr_1',
+      parentTurnId: 'turn_1',
+      prompt: 'x',
+      profile: 'ghost',
+      signal: new AbortController().signal
+    })).rejects.toThrow(/unknown subagent profile/)
+  })
+
+  it('defaults the tool policy to read-only when no profile resolves', async () => {
+    const seen: string[] = []
+    const runtime = createRuntime({
+      executor: async (input) => {
+        seen.push(input.toolPolicy)
+        return { summary: 'ok' }
+      }
+    })
+    const record = await runtime.runChild({
+      parentThreadId: 'thr_1',
+      parentTurnId: 'turn_1',
+      prompt: 'investigate',
+      signal: new AbortController().signal
+    })
+    expect(seen[0]).toBe('readOnly')
+    expect(record.toolPolicy).toBe('readOnly')
+  })
+
+  it('emits queued -> running -> completed events with observability metrics', async () => {
+    const sessionStore = new InMemorySessionStore()
+    const runtime = createRuntime({
+      sessionStore,
+      executor: async () => ({
+        summary: 'ok',
+        usage: { promptTokens: 1, completionTokens: 2, totalTokens: 3, cacheHitRate: 0.5, costUsd: 0.01 },
+        toolInvocations: 4,
+        prefixReused: true,
+        inheritedHistoryItems: 0
+      })
+    })
+    const record = await runtime.runChild({
+      parentThreadId: 'thr_1',
+      parentTurnId: 'turn_1',
+      prompt: 'go',
+      signal: new AbortController().signal
+    })
+    const events = await sessionStore.loadEventsSince('thr_1', 0)
+    const statuses = events
+      .filter((event) => event.child?.childId === record.id)
+      .map((event) => event.child?.childStatus)
+    expect(statuses).toEqual(['queued', 'running', 'completed'])
+    const completed = events.find((event) => event.child?.childId === record.id && event.child.childStatus === 'completed')
+    expect(completed?.child).toMatchObject({
+      toolInvocations: 4,
+      prefixReused: true,
+      totalTokens: 3,
+      cacheHitRate: 0.5,
+      childToolPolicy: 'readOnly'
     })
   })
 
@@ -184,7 +297,11 @@ describe('DelegationRuntime', () => {
 
   function createRuntime(options: {
     enabled?: boolean
+    maxParallel?: number
     maxChildRuns?: number
+    defaultToolPolicy?: 'readOnly' | 'inherit'
+    defaultProfile?: string
+    profiles?: Record<string, { model?: string; promptPreamble?: string; toolPolicy?: 'readOnly' | 'inherit' }>
     sessionStore?: InMemorySessionStore
     executor?: ConstructorParameters<typeof DelegationRuntime>[0]['executor']
     recordExternalUsage?: ConstructorParameters<typeof DelegationRuntime>[0]['recordExternalUsage']
@@ -200,16 +317,20 @@ describe('DelegationRuntime', () => {
     const config = KunCapabilitiesConfig.parse({
       subagents: {
         enabled: options.enabled ?? true,
-        maxParallel: 1,
-        maxChildRuns: options.maxChildRuns ?? 3
+        maxParallel: options.maxParallel ?? 1,
+        maxChildRuns: options.maxChildRuns ?? 3,
+        ...(options.defaultToolPolicy ? { defaultToolPolicy: options.defaultToolPolicy } : {}),
+        ...(options.defaultProfile ? { defaultProfile: options.defaultProfile } : {}),
+        ...(options.profiles ? { profiles: options.profiles } : {})
       }
     }).subagents
+    let idSeq = 0
     return new DelegationRuntime({
       config,
       store: new FileDelegationStore(join(dir, 'children')),
       events: recorder,
       nowIso: () => '2026-06-03T00:00:00.000Z',
-      idGenerator: () => `child_${Math.random().toString(36).slice(2, 8)}`,
+      idGenerator: () => `child_${++idSeq}_${Math.random().toString(36).slice(2, 6)}`,
       recordExternalUsage: options.recordExternalUsage,
       executor: options.executor ?? (async ({ prompt }) => ({
         summary: `done: ${prompt}`,
@@ -218,3 +339,22 @@ describe('DelegationRuntime', () => {
     })
   }
 })
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void; reject: (error: unknown) => void } {
+  let resolve!: (value: T) => void
+  let reject!: (error: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
+async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 2000): Promise<void> {
+  const start = Date.now()
+  for (;;) {
+    if (await predicate()) return
+    if (Date.now() - start > timeoutMs) throw new Error('waitFor timed out')
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+}

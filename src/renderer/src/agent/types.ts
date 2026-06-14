@@ -2,6 +2,7 @@ import type {
   CoreAttachmentContentResponseJson,
   CoreAttachmentMetadataJson,
   CoreAttachmentTextFallbackJson,
+  CoreMemoryDiagnosticsJson,
   CoreMemoryRecordJson,
   CoreRuntimeInfoJson,
   CoreRuntimeSkillJson,
@@ -464,11 +465,20 @@ export interface AgentProvider {
     options?: { threadId?: string; workspace?: string }
   ): Promise<CoreAttachmentContentResponseJson>
   listMemories?(options?: { workspace?: string; includeDeleted?: boolean }): Promise<CoreMemoryRecordJson[]>
+  createMemory?(input: {
+    content: string
+    scope?: 'user' | 'workspace' | 'project'
+    workspace?: string
+    project?: string
+    tags?: string[]
+    confidence?: number
+  }): Promise<CoreMemoryRecordJson>
   updateMemory?(
     memoryId: string,
     patch: { content?: string; tags?: string[]; confidence?: number; disabled?: boolean }
   ): Promise<CoreMemoryRecordJson>
   deleteMemory?(memoryId: string): Promise<CoreMemoryRecordJson>
+  getMemoryDiagnostics?(): Promise<CoreMemoryDiagnosticsJson>
   steerUserMessage?(threadId: string, turnId: string, text: string): Promise<void>
   interruptTurn(threadId: string, turnId: string, options?: { discard?: boolean }): Promise<void>
   renameThread(threadId: string, title: string): Promise<void>

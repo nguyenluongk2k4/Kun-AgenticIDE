@@ -198,6 +198,9 @@ export type CoreRuntimeCapabilityManifestJson = {
   subagents: CoreRuntimeCapabilityStateJson & {
     maxParallel: number
     maxChildRuns: number
+    defaultToolPolicy?: 'readOnly' | 'inherit'
+    defaultProfile?: string
+    profiles?: Array<{ name: string; model?: string; toolPolicy: 'readOnly' | 'inherit' }>
   }
   attachments: CoreRuntimeCapabilityStateJson & {
     maxImageBytes: number
@@ -305,6 +308,18 @@ export type CoreChildRuntimeMetadataJson = {
   childLabel?: string
   childStatus: 'queued' | 'running' | 'completed' | 'failed' | 'aborted'
   childSeq: number
+  childModel?: string
+  childProfile?: string
+  childToolPolicy?: 'readOnly' | 'inherit'
+  prefixReused?: boolean
+  inheritedHistoryItems?: number
+  toolInvocations?: number
+  durationMs?: number
+  queuedMs?: number
+  totalTokens?: number
+  cacheHitRate?: number | null
+  costUsd?: number
+  costCny?: number
 }
 
 export type CoreWebSourceJson = {

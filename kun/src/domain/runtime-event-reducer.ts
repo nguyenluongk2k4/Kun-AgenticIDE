@@ -25,6 +25,19 @@ export type EventSourcedChildRunProjection = {
   seq: number
   updatedAt: string
   text?: string
+  /** Observability metrics carried on the child lifecycle events. */
+  model?: string
+  profile?: string
+  toolPolicy?: 'readOnly' | 'inherit'
+  prefixReused?: boolean
+  inheritedHistoryItems?: number
+  toolInvocations?: number
+  durationMs?: number
+  queuedMs?: number
+  totalTokens?: number
+  cacheHitRate?: number | null
+  costUsd?: number
+  costCny?: number
 }
 
 export type EventSourcedRuntimeProjection = {
@@ -244,7 +257,19 @@ function upsertChildRun(
     status: child.childStatus,
     seq: child.childSeq,
     updatedAt: event.timestamp,
-    ...(event.text ? { text: event.text } : {})
+    ...(event.text ? { text: event.text } : {}),
+    ...(child.childModel ? { model: child.childModel } : {}),
+    ...(child.childProfile ? { profile: child.childProfile } : {}),
+    ...(child.childToolPolicy ? { toolPolicy: child.childToolPolicy } : {}),
+    ...(child.prefixReused !== undefined ? { prefixReused: child.prefixReused } : {}),
+    ...(child.inheritedHistoryItems !== undefined ? { inheritedHistoryItems: child.inheritedHistoryItems } : {}),
+    ...(child.toolInvocations !== undefined ? { toolInvocations: child.toolInvocations } : {}),
+    ...(child.durationMs !== undefined ? { durationMs: child.durationMs } : {}),
+    ...(child.queuedMs !== undefined ? { queuedMs: child.queuedMs } : {}),
+    ...(child.totalTokens !== undefined ? { totalTokens: child.totalTokens } : {}),
+    ...(child.cacheHitRate !== undefined ? { cacheHitRate: child.cacheHitRate } : {}),
+    ...(child.costUsd !== undefined ? { costUsd: child.costUsd } : {}),
+    ...(child.costCny !== undefined ? { costCny: child.costCny } : {})
   }
   if (existingIndex >= 0) projection.childRuns[existingIndex] = next
   else projection.childRuns.push(next)

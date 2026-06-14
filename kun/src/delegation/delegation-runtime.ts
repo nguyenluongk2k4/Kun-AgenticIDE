@@ -1,7 +1,7 @@
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { z } from 'zod'
-import type { SubagentsCapabilityConfig } from '../contracts/capabilities.js'
+import { SubagentToolPolicy, type SubagentsCapabilityConfig } from '../contracts/capabilities.js'
 import type { RuntimeEventRecorder } from '../services/runtime-event-recorder.js'
 import type { UsageSnapshot } from '../contracts/usage.js'
 
@@ -31,11 +31,27 @@ export const ChildRunRecord = z.object({
   prompt: z.string().min(1),
   workspace: z.string().optional(),
   model: z.string().optional(),
+  /** Resolved subagent profile name, when one was selected. */
+  profile: z.string().optional(),
+  /** Effective tool policy applied to the child (read-only vs inherited). */
+  toolPolicy: SubagentToolPolicy.optional(),
   status: z.enum(['queued', 'running', 'completed', 'failed', 'aborted']),
   summary: z.string().optional(),
   error: z.string().optional(),
   usage: ChildRunUsage.default({ promptTokens: 0, completionTokens: 0, totalTokens: 0 }),
+  /** True when the child reused the main agent's cached stable prefix. */
+  prefixReused: z.boolean().optional(),
+  /** Parent history items seeded into the child (0 = prefix-only). */
+  inheritedHistoryItems: z.number().int().nonnegative().optional(),
+  /** Tool calls the child executed during its run. */
+  toolInvocations: z.number().int().nonnegative().optional(),
+  /** Wall-clock spent running (after leaving the queue). */
+  durationMs: z.number().int().nonnegative().optional(),
+  /** Wall-clock spent waiting for a parallel slot before starting. */
+  queuedMs: z.number().int().nonnegative().optional(),
   createdAt: z.string(),
+  /** When the child left the queue and began running. */
+  startedAt: z.string().optional(),
   updatedAt: z.string()
 }).strict()
 export type ChildRunRecord = z.infer<typeof ChildRunRecord>
@@ -48,8 +64,16 @@ export type ChildRunExecutor = (input: {
   prompt: string
   workspace?: string
   model?: string
+  toolPolicy: SubagentToolPolicy
+  promptPreamble?: string
   signal: AbortSignal
-}) => Promise<{ summary: string; usage?: ChildRunRecord['usage'] }>
+}) => Promise<{
+  summary: string
+  usage?: ChildRunRecord['usage']
+  toolInvocations?: number
+  prefixReused?: boolean
+  inheritedHistoryItems?: number
+}>
 
 export type ChildRunAggregate = {
   key: string
@@ -92,9 +116,22 @@ export class FileDelegationStore {
   }
 }
 
+type SlotWaiter = {
+  resolve: () => void
+  reject: (error: unknown) => void
+  signal: AbortSignal
+  onAbort: () => void
+}
+
 export class DelegationRuntime {
   private active = 0
   private childSeq = 0
+  /** Children waiting for a parallel slot, in FIFO order. */
+  private readonly slotWaiters: SlotWaiter[] = []
+  /** Per-thread child counts (persisted + in-flight) for the budget cap. */
+  private readonly threadCounts = new Map<string, number>()
+  /** Cached per-thread seed reads so concurrent first-spawns don't double-count. */
+  private readonly threadSeeds = new Map<string, Promise<void>>()
 
   constructor(private readonly options: {
     config: SubagentsCapabilityConfig
@@ -113,13 +150,30 @@ export class DelegationRuntime {
     prompt: string
     workspace?: string
     model?: string
+    profile?: string
     signal: AbortSignal
   }): Promise<ChildRunRecord> {
-    if (!this.options.config.enabled) throw new Error('delegation is disabled by config')
-    if (this.active >= this.options.config.maxParallel) throw new Error('delegation parallel budget exhausted')
-    const existing = await this.options.store.list(input.parentThreadId)
-    if (existing.length >= this.options.config.maxChildRuns) throw new Error('delegation child-run budget exhausted')
-    const now = this.now()
+    const config = this.options.config
+    if (!config.enabled) throw new Error('delegation is disabled by config')
+
+    // Resolve the profile up front so model/preamble/tool-policy are
+    // captured on the record even if the child later fails.
+    const profileName = input.profile?.trim() || config.defaultProfile
+    const profile = profileName ? config.profiles[profileName] : undefined
+    if (profileName && !profile) {
+      throw new Error(`unknown subagent profile: ${profileName}`)
+    }
+    const toolPolicy = profile?.toolPolicy ?? config.defaultToolPolicy
+    const resolvedModel = input.model?.trim() || profile?.model
+    const promptPreamble = profile?.promptPreamble
+
+    // Reserve against the per-thread budget before persisting anything.
+    await this.ensureSeeded(input.parentThreadId)
+    if (!this.reserveChild(input.parentThreadId)) {
+      throw new Error('delegation child-run budget exhausted')
+    }
+
+    const queuedAt = this.now()
     const id = this.options.idGenerator?.() ?? `child_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
     let record = ChildRunRecord.parse({
       id,
@@ -128,14 +182,36 @@ export class DelegationRuntime {
       label: input.label,
       prompt: input.prompt,
       workspace: input.workspace,
-      model: input.model,
-      status: 'running',
-      createdAt: now,
-      updatedAt: now
+      model: resolvedModel,
+      profile: profileName,
+      toolPolicy,
+      status: 'queued',
+      createdAt: queuedAt,
+      updatedAt: queuedAt
     })
     await this.options.store.upsert(record)
     await this.recordChildEvent(record)
-    this.active += 1
+
+    try {
+      await this.acquireSlot(input.signal)
+    } catch (error) {
+      // Aborted while still queued — never started, so no slot to release.
+      record = ChildRunRecord.parse({
+        ...record,
+        status: 'aborted',
+        error: errorMessage(error),
+        updatedAt: this.now()
+      })
+      await this.options.store.upsert(record)
+      await this.recordChildEvent(record)
+      return record
+    }
+
+    const startedAt = this.now()
+    const queuedMs = elapsedMs(queuedAt, startedAt)
+    record = ChildRunRecord.parse({ ...record, status: 'running', startedAt, queuedMs, updatedAt: startedAt })
+    await this.options.store.upsert(record)
+    await this.recordChildEvent(record)
     try {
       const executor: ChildRunExecutor = this.options.executor ?? defaultExecutor
       const result = await executor({
@@ -145,33 +221,123 @@ export class DelegationRuntime {
         ...(input.label ? { label: input.label } : {}),
         prompt: input.prompt,
         workspace: input.workspace,
-        model: input.model,
+        model: resolvedModel,
+        toolPolicy,
+        ...(promptPreamble ? { promptPreamble } : {}),
         signal: input.signal
       })
+      const finishedAt = this.now()
       record = ChildRunRecord.parse({
         ...record,
         status: 'completed',
         summary: result.summary,
         usage: result.usage ?? record.usage,
-        updatedAt: this.now()
+        toolInvocations: result.toolInvocations,
+        prefixReused: result.prefixReused,
+        inheritedHistoryItems: result.inheritedHistoryItems,
+        durationMs: elapsedMs(startedAt, finishedAt),
+        updatedAt: finishedAt
       })
       await this.options.store.upsert(record)
       await this.recordChildEvent(record)
       this.recordExternalUsage(record)
       return record
     } catch (error) {
+      const finishedAt = this.now()
       record = ChildRunRecord.parse({
         ...record,
         status: input.signal.aborted ? 'aborted' : 'failed',
         error: errorMessage(error),
-        updatedAt: this.now()
+        durationMs: elapsedMs(startedAt, finishedAt),
+        updatedAt: finishedAt
       })
       await this.options.store.upsert(record)
       await this.recordChildEvent(record)
       return record
     } finally {
-      this.active -= 1
+      this.releaseSlot()
     }
+  }
+
+  /** Concurrency ceiling; clamps to at least 1 so an enabled runtime never deadlocks. */
+  private get parallelLimit(): number {
+    return Math.max(1, this.options.config.maxParallel)
+  }
+
+  /** Acquire a parallel slot, queueing (FIFO) when the runtime is saturated. */
+  private acquireSlot(signal: AbortSignal): Promise<void> {
+    if (signal.aborted) return Promise.reject(new Error('aborted while queued'))
+    if (this.active < this.parallelLimit) {
+      this.active += 1
+      return Promise.resolve()
+    }
+    return new Promise<void>((resolve, reject) => {
+      const waiter: SlotWaiter = {
+        resolve,
+        reject,
+        signal,
+        onAbort: () => {
+          const index = this.slotWaiters.indexOf(waiter)
+          if (index >= 0) this.slotWaiters.splice(index, 1)
+          reject(new Error('aborted while queued'))
+        }
+      }
+      signal.addEventListener('abort', waiter.onAbort, { once: true })
+      this.slotWaiters.push(waiter)
+    })
+  }
+
+  /** Hand the freed slot to the next waiter, or shrink the active count. */
+  private releaseSlot(): void {
+    const next = this.slotWaiters.shift()
+    if (next) {
+      next.signal.removeEventListener('abort', next.onAbort)
+      next.resolve() // slot is handed over directly; `active` stays the same
+    } else {
+      this.active = Math.max(0, this.active - 1)
+    }
+  }
+
+  /** Seed the per-thread budget counter from persisted records exactly once. */
+  private ensureSeeded(threadId: string): Promise<void> {
+    let seed = this.threadSeeds.get(threadId)
+    if (!seed) {
+      seed = this.options.store
+        .list(threadId)
+        .then((runs) => {
+          if (!this.threadCounts.has(threadId)) this.threadCounts.set(threadId, runs.length)
+        })
+        .catch(() => {
+          if (!this.threadCounts.has(threadId)) this.threadCounts.set(threadId, 0)
+        })
+      this.threadSeeds.set(threadId, seed)
+    }
+    return seed
+  }
+
+  /** Atomically reserve a budget slot; returns false when the cap is reached. */
+  private reserveChild(threadId: string): boolean {
+    const used = this.threadCounts.get(threadId) ?? 0
+    if (used >= this.options.config.maxChildRuns) return false
+    this.threadCounts.set(threadId, used + 1)
+    return true
+  }
+
+  /** Configured profiles, surfaced to the delegate_task tool schema/UI. */
+  listProfiles(): { name: string; toolPolicy: SubagentToolPolicy; model?: string }[] {
+    return Object.entries(this.options.config.profiles).map(([name, profile]) => ({
+      name,
+      toolPolicy: profile.toolPolicy,
+      ...(profile.model ? { model: profile.model } : {})
+    }))
+  }
+
+  get defaultProfileName(): string | undefined {
+    return this.options.config.defaultProfile
+  }
+
+  get defaultToolPolicy(): SubagentToolPolicy {
+    return this.options.config.defaultToolPolicy
   }
 
   async diagnostics(parentThreadId?: string): Promise<{
@@ -190,6 +356,7 @@ export class DelegationRuntime {
   }
 
   private async recordChildEvent(record: ChildRunRecord): Promise<void> {
+    const usage = record.usage
     await this.options.events?.record({
       kind: record.status === 'completed' ? 'turn_completed' : record.status === 'failed' ? 'turn_failed' : record.status === 'aborted' ? 'turn_aborted' : 'turn_started',
       threadId: record.parentThreadId,
@@ -202,7 +369,19 @@ export class DelegationRuntime {
         childId: record.id,
         childLabel: record.label,
         childStatus: record.status,
-        childSeq: ++this.childSeq
+        childSeq: ++this.childSeq,
+        ...(record.model ? { childModel: record.model } : {}),
+        ...(record.profile ? { childProfile: record.profile } : {}),
+        ...(record.toolPolicy ? { childToolPolicy: record.toolPolicy } : {}),
+        ...(record.prefixReused !== undefined ? { prefixReused: record.prefixReused } : {}),
+        ...(record.inheritedHistoryItems !== undefined ? { inheritedHistoryItems: record.inheritedHistoryItems } : {}),
+        ...(record.toolInvocations !== undefined ? { toolInvocations: record.toolInvocations } : {}),
+        ...(record.durationMs !== undefined ? { durationMs: record.durationMs } : {}),
+        ...(record.queuedMs !== undefined ? { queuedMs: record.queuedMs } : {}),
+        ...(usage.totalTokens > 0 ? { totalTokens: usage.totalTokens } : {}),
+        ...(usage.cacheHitRate !== undefined && usage.cacheHitRate !== null ? { cacheHitRate: usage.cacheHitRate } : {}),
+        ...(usage.costUsd !== undefined ? { costUsd: usage.costUsd } : {}),
+        ...(usage.costCny !== undefined ? { costCny: usage.costCny } : {})
       }
     })
   }
@@ -285,4 +464,12 @@ const defaultExecutor: ChildRunExecutor = async (input) => {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+/** Non-negative millisecond delta between two ISO timestamps (0 when unparseable). */
+function elapsedMs(fromIso: string, toIso: string): number {
+  const from = Date.parse(fromIso)
+  const to = Date.parse(toIso)
+  if (Number.isNaN(from) || Number.isNaN(to)) return 0
+  return Math.max(0, to - from)
 }

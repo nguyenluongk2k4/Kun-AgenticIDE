@@ -299,22 +299,9 @@ function baseCtx(): Record<string, unknown> {
     skillSectionRef: ref,
     mcpSectionRef: ref,
     permissionsSectionRef: ref,
-    selectedSkillRoot: {
-      id: 'workspace',
-      label: 'Workspace',
-      path: '/tmp/project/.agents/skills',
-      available: true
-    },
-    skillRootOptions: [
-      {
-        id: 'workspace',
-        label: 'Workspace',
-        path: '/tmp/project/.agents/skills',
-        available: true
-      }
-    ],
-    skillRootId: 'workspace',
-    setSkillRootId: noop,
+    skillRoots: [],
+    skillRootsLoading: false,
+    toggleSkillRoot: noop,
     skillNotice: null,
     openSkillRoot: asyncNoop,
     openPlugins: noop,
