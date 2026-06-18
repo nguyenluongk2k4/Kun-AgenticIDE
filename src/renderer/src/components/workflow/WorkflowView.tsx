@@ -6,6 +6,7 @@ import {
   mergeWorkflowSettings,
   normalizeWorkflowSettings,
   type AppSettingsV1,
+  type WorkflowNodeRunResultV1,
   type WorkflowNodeV1,
   type WorkflowRuntimeStatus,
   type WorkflowV1
@@ -142,6 +143,20 @@ export function WorkflowView({ leftSidebarCollapsed, onToggleLeftSidebar }: Prop
     [refreshStatus]
   )
 
+  const handleRunNode = useCallback(
+    async (workflowId: string, nodeId: string): Promise<void> => {
+      if (typeof window.kunGui?.runWorkflowNode !== 'function') return
+      const result = await window.kunGui.runWorkflowNode(workflowId, nodeId)
+      if (!result.ok) {
+        setError(result.message)
+        return
+      }
+      setError(null)
+      void refreshStatus()
+    },
+    [refreshStatus]
+  )
+
   const handleEditorPersist = useCallback(
     async (patch: {
       name: string
@@ -164,15 +179,22 @@ export function WorkflowView({ leftSidebarCollapsed, onToggleLeftSidebar }: Prop
   const editingWorkflow = editingId ? workflows.find((workflow) => workflow.id === editingId) ?? null : null
 
   if (editingWorkflow && settings) {
+    const lastRun = editingWorkflow.runs[editingWorkflow.runs.length - 1]
+    const lastResults: Record<string, WorkflowNodeRunResultV1> = {}
+    if (lastRun) {
+      for (const result of lastRun.nodeResults) lastResults[result.nodeId] = result
+    }
     return (
       <WorkflowEditorView
         key={editingWorkflow.id}
         workflow={editingWorkflow}
         settings={settings}
         runStatus={status?.nodeStatus[editingWorkflow.id] ?? {}}
+        lastResults={lastResults}
         running={runningIds.has(editingWorkflow.id)}
         onPersist={handleEditorPersist}
         onRun={() => handleRun(editingWorkflow.id)}
+        onRunNode={(nodeId) => handleRunNode(editingWorkflow.id, nodeId)}
         onStop={() => handleStop(editingWorkflow.id)}
         onBack={() => setEditingId(null)}
       />

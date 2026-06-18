@@ -542,6 +542,7 @@ export type WorkflowNodeKind =
   | 'schedule-trigger'
   | 'ai-agent'
   | 'condition'
+  | 'set-fields'
   | 'http-request'
   | 'delay'
 
@@ -550,6 +551,7 @@ export const WORKFLOW_NODE_KINDS: readonly WorkflowNodeKind[] = [
   'schedule-trigger',
   'ai-agent',
   'condition',
+  'set-fields',
   'http-request',
   'delay'
 ]
@@ -628,11 +630,24 @@ export type WorkflowDelayConfigV1 = {
   delayMs: number
 }
 
+export type WorkflowFieldV1 = {
+  key: string
+  /** Templated with {{json.x}} / {{text}} from the incoming payload. */
+  value: string
+}
+
+export type WorkflowSetFieldsConfigV1 = {
+  fields: WorkflowFieldV1[]
+  /** When true, merge the new fields onto the incoming json; otherwise replace it. */
+  keepIncoming: boolean
+}
+
 export type WorkflowNodeConfigByKind = {
   'manual-trigger': WorkflowManualTriggerConfigV1
   'schedule-trigger': WorkflowScheduleTriggerConfigV1
   'ai-agent': WorkflowAiAgentConfigV1
   condition: WorkflowConditionConfigV1
+  'set-fields': WorkflowSetFieldsConfigV1
   'http-request': WorkflowHttpRequestConfigV1
   delay: WorkflowDelayConfigV1
 }

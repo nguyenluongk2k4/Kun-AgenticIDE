@@ -1,14 +1,18 @@
 import type { ComponentType, ReactElement } from 'react'
 import { createContext, useContext } from 'react'
-import { Handle, Position, type NodeProps, type NodeTypes } from '@xyflow/react'
+import { Handle, NodeToolbar, Position, type NodeProps, type NodeTypes } from '@xyflow/react'
 import { useTranslation } from 'react-i18next'
 import {
+  Braces,
   Brain,
   CalendarClock,
   GitBranch,
   Globe,
   Hand,
+  Play,
+  Power,
   Timer,
+  Trash2,
   type LucideIcon
 } from 'lucide-react'
 import type { WorkflowNodeKind, WorkflowNodeRunStatus, WorkflowNodeV1 } from '@shared/app-settings'
@@ -17,11 +21,24 @@ import type { WorkflowFlowNodeData } from './workflow-types'
 /** workflowId-scoped live node status, provided by the editor and read by each node. */
 export const WorkflowRunStatusContext = createContext<Record<string, WorkflowNodeRunStatus>>({})
 
+export type WorkflowNodeActions = {
+  runNode: (nodeId: string) => void
+  toggleDisabled: (nodeId: string) => void
+  deleteNode: (nodeId: string) => void
+}
+
+export const WorkflowNodeActionsContext = createContext<WorkflowNodeActions>({
+  runNode: () => {},
+  toggleDisabled: () => {},
+  deleteNode: () => {}
+})
+
 export const NODE_ICONS: Record<WorkflowNodeKind, LucideIcon> = {
   'manual-trigger': Hand,
   'schedule-trigger': CalendarClock,
   'ai-agent': Brain,
   condition: GitBranch,
+  'set-fields': Braces,
   'http-request': Globe,
   delay: Timer
 }
@@ -55,6 +72,8 @@ function nodeSummary(node: WorkflowNodeV1): string {
       return node.config.prompt.trim().slice(0, 60) || node.config.model || 'AI task'
     case 'condition':
       return `${node.config.leftExpr || 'text'} ${node.config.operator} ${node.config.rightValue}`.trim()
+    case 'set-fields':
+      return node.config.fields.map((field) => field.key).filter(Boolean).join(', ')
     case 'http-request':
       return `${node.config.method} ${node.config.url}`.trim()
     case 'delay':
@@ -64,9 +83,13 @@ function nodeSummary(node: WorkflowNodeV1): string {
   }
 }
 
+const TOOLBAR_BTN =
+  'nodrag nopan flex h-7 w-7 items-center justify-center rounded-md text-ds-muted transition hover:bg-ds-hover hover:text-ds-ink'
+
 function WorkflowCanvasNode({ id, data, selected }: NodeProps): ReactElement {
   const { t } = useTranslation('common')
   const runStatus = useContext(WorkflowRunStatusContext)
+  const actions = useContext(WorkflowNodeActionsContext)
   const node = (data as WorkflowFlowNodeData).node
   const Icon = NODE_ICONS[node.type]
   const status = runStatus[id]
@@ -81,6 +104,40 @@ function WorkflowCanvasNode({ id, data, selected }: NodeProps): ReactElement {
     <div
       className={`relative w-[210px] rounded-xl border bg-ds-card px-3 py-2.5 shadow-sm ${ring} ${disabled}`}
     >
+      <NodeToolbar isVisible={selected} position={Position.Top} offset={8}>
+        <div className="flex items-center gap-0.5 rounded-lg border border-ds-border bg-ds-card p-1 shadow-md">
+          {!isTrigger ? (
+            <button
+              type="button"
+              className={TOOLBAR_BTN}
+              title={t('workflowRunNode')}
+              aria-label={t('workflowRunNode')}
+              onClick={() => actions.runNode(id)}
+            >
+              <Play className="h-3.5 w-3.5" strokeWidth={1.9} />
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className={TOOLBAR_BTN}
+            title={node.disabled ? t('workflowEnableNode') : t('workflowDisableNode')}
+            aria-label={node.disabled ? t('workflowEnableNode') : t('workflowDisableNode')}
+            onClick={() => actions.toggleDisabled(id)}
+          >
+            <Power className="h-3.5 w-3.5" strokeWidth={1.9} />
+          </button>
+          <button
+            type="button"
+            className={`${TOOLBAR_BTN} hover:bg-red-500/10 hover:text-red-600`}
+            title={t('workflowDeleteNode')}
+            aria-label={t('workflowDeleteNode')}
+            onClick={() => actions.deleteNode(id)}
+          >
+            <Trash2 className="h-3.5 w-3.5" strokeWidth={1.9} />
+          </button>
+        </div>
+      </NodeToolbar>
+
       {!isTrigger ? (
         <Handle type="target" position={Position.Left} id="in" />
       ) : null}
@@ -135,6 +192,7 @@ export const workflowNodeTypes: NodeTypes = {
   'schedule-trigger': sharedNode,
   'ai-agent': sharedNode,
   condition: sharedNode,
+  'set-fields': sharedNode,
   'http-request': sharedNode,
   delay: sharedNode
 }

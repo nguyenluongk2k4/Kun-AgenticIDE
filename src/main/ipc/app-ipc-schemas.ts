@@ -765,6 +765,17 @@ const workflowDelayConfigSchema = z
   .object({ delayMs: z.number().int().min(0).max(86_400_000).optional() })
   .strict()
 
+const workflowFieldSchema = z
+  .object({ key: z.string().max(256), value: z.string().max(MAX_BODY_BYTES) })
+  .strict()
+
+const workflowSetFieldsConfigSchema = z
+  .object({
+    fields: z.array(workflowFieldSchema).max(50).optional(),
+    keepIncoming: z.boolean().optional()
+  })
+  .strict()
+
 const workflowNodeBaseShape = {
   id: z.string().max(MAX_ID_LENGTH),
   name: z.string().max(512).optional(),
@@ -783,6 +794,7 @@ const workflowNodePatchSchema = z.discriminatedUnion('type', [
     .strict(),
   z.object({ ...workflowNodeBaseShape, type: z.literal('ai-agent'), config: workflowAiAgentConfigSchema.optional() }).strict(),
   z.object({ ...workflowNodeBaseShape, type: z.literal('condition'), config: workflowConditionConfigSchema.optional() }).strict(),
+  z.object({ ...workflowNodeBaseShape, type: z.literal('set-fields'), config: workflowSetFieldsConfigSchema.optional() }).strict(),
   z.object({ ...workflowNodeBaseShape, type: z.literal('http-request'), config: workflowHttpRequestConfigSchema.optional() }).strict(),
   z.object({ ...workflowNodeBaseShape, type: z.literal('delay'), config: workflowDelayConfigSchema.optional() }).strict()
 ])

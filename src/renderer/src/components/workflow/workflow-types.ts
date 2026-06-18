@@ -13,6 +13,7 @@ export const WORKFLOW_PALETTE: readonly WorkflowNodeKind[] = [
   'schedule-trigger',
   'ai-agent',
   'condition',
+  'set-fields',
   'http-request',
   'delay'
 ]
@@ -63,6 +64,12 @@ export function createWorkflowNode(
         type: 'condition',
         config: { leftExpr: '', operator: 'contains', rightValue: '', caseSensitive: false }
       }
+    case 'set-fields':
+      return {
+        ...base,
+        type: 'set-fields',
+        config: { fields: [{ key: '', value: '' }], keepIncoming: false }
+      }
     case 'http-request':
       return {
         ...base,
@@ -96,7 +103,7 @@ export function createWorkflow(name: string): WorkflowV1 {
 }
 
 const EDGE_DEFAULTS = {
-  type: 'smoothstep',
+  type: 'default',
   markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16 }
 } as const
 

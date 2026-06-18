@@ -2,6 +2,7 @@ import {
   WORKFLOW_NODE_KINDS,
   type WorkflowConditionOperator,
   type WorkflowConnectionV1,
+  type WorkflowFieldV1,
   type WorkflowHttpHeaderV1,
   type WorkflowHttpMethod,
   type WorkflowNodeKind,
@@ -103,6 +104,17 @@ function normalizeHttpHeaders(value: unknown): WorkflowHttpHeaderV1[] {
     .slice(0, MAX_WORKFLOW_HTTP_HEADERS)
 }
 
+function normalizeFields(value: unknown): WorkflowFieldV1[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((entry) => {
+      const r = record(entry)
+      return { key: asTrimmed(r.key), value: asText(r.value) }
+    })
+    .filter((field) => field.key)
+    .slice(0, MAX_WORKFLOW_HTTP_HEADERS)
+}
+
 export function normalizeWorkflowNode(value: unknown, index: number): WorkflowNodeV1 | null {
   const n = record(value)
   const type = n.type
@@ -142,6 +154,15 @@ export function normalizeWorkflowNode(value: unknown, index: number): WorkflowNo
           operator: normalizeConditionOperator(config.operator),
           rightValue: asText(config.rightValue),
           caseSensitive: normalizeBoolean(config.caseSensitive, false)
+        }
+      }
+    case 'set-fields':
+      return {
+        ...base,
+        type: 'set-fields',
+        config: {
+          fields: normalizeFields(config.fields),
+          keepIncoming: normalizeBoolean(config.keepIncoming, false)
         }
       }
     case 'http-request':

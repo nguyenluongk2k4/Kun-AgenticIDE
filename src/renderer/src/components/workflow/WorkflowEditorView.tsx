@@ -1,4 +1,4 @@
-import type { ReactElement } from 'react'
+import type { DragEvent, ReactElement } from 'react'
 import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
@@ -11,19 +11,27 @@ import {
   addEdge,
   applyEdgeChanges,
   applyNodeChanges,
+  useReactFlow,
   type Connection,
   type EdgeChange,
   type NodeChange
 } from '@xyflow/react'
-import { ArrowLeft, Play, Plus, Save, Square } from 'lucide-react'
+import { ArrowLeft, MousePointerClick, Play, Plus, Save, Square } from 'lucide-react'
 import type {
   AppSettingsV1,
   WorkflowNodeKind,
+  WorkflowNodeRunResultV1,
   WorkflowNodeRunStatus,
   WorkflowNodeV1,
   WorkflowV1
 } from '@shared/app-settings'
-import { NODE_ICONS, WorkflowRunStatusContext, workflowNodeTypes } from './WorkflowNodes'
+import {
+  NODE_ICONS,
+  WorkflowNodeActionsContext,
+  WorkflowRunStatusContext,
+  workflowNodeTypes,
+  type WorkflowNodeActions
+} from './WorkflowNodes'
 import { NodeConfigPanel } from './NodeConfigPanel'
 import {
   WORKFLOW_PALETTE,
@@ -35,10 +43,15 @@ import {
   type WorkflowFlowNode
 } from './workflow-types'
 
+const DND_MIME = 'application/x-workflow-node'
+
+type WorkflowConnectionsArg = ReturnType<typeof flowToWorkflowGraph>['connections']
+
 type Props = {
   workflow: WorkflowV1
   settings: AppSettingsV1
   runStatus: Record<string, WorkflowNodeRunStatus>
+  lastResults: Record<string, WorkflowNodeRunResultV1>
   running: boolean
   onPersist: (patch: {
     name: string
@@ -47,23 +60,25 @@ type Props = {
     connections: WorkflowConnectionsArg
   }) => Promise<void>
   onRun: () => Promise<void> | void
+  onRunNode: (nodeId: string) => Promise<void> | void
   onStop: () => Promise<void> | void
   onBack: () => void
 }
-
-type WorkflowConnectionsArg = ReturnType<typeof flowToWorkflowGraph>['connections']
 
 function WorkflowEditorInner({
   workflow,
   settings,
   runStatus,
+  lastResults,
   running,
   onPersist,
   onRun,
+  onRunNode,
   onStop,
   onBack
 }: Props): ReactElement {
   const { t } = useTranslation('common')
+  const { screenToFlowPosition } = useReactFlow()
   const [name, setName] = useState(workflow.name)
   const [enabled, setEnabled] = useState(workflow.enabled)
   const [rfNodes, setRfNodes] = useState<WorkflowFlowNode[]>(() => toFlowNodes(workflow.nodes))
@@ -72,10 +87,10 @@ function WorkflowEditorInner({
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
 
-  const styledEdges = useMemo(() => {
-    const decorated = toFlowEdges(flowToWorkflowGraph(rfNodes, rfEdges).connections, runStatus)
-    return decorated
-  }, [rfEdges, rfNodes, runStatus])
+  const styledEdges = useMemo(
+    () => toFlowEdges(flowToWorkflowGraph(rfNodes, rfEdges).connections, runStatus),
+    [rfEdges, rfNodes, runStatus]
+  )
 
   const selectedNode = useMemo(
     () => (selectedNodeId ? rfNodes.find((node) => node.id === selectedNodeId)?.data.node ?? null : null),
@@ -99,14 +114,41 @@ function WorkflowEditorInner({
     setDirty(true)
   }, [])
 
-  const addNode = useCallback((kind: WorkflowNodeKind) => {
-    setRfNodes((nodes) => {
-      const offset = nodes.length * 24
-      const node = createWorkflowNode(kind, { x: 320 + (offset % 160), y: 120 + offset })
-      return [...nodes, { id: node.id, type: node.type, position: node.position, data: { node } }]
-    })
+  const insertNode = useCallback((kind: WorkflowNodeKind, position: { x: number; y: number }) => {
+    const node = createWorkflowNode(kind, position)
+    setRfNodes((nodes) => [...nodes, { id: node.id, type: node.type, position: node.position, data: { node } }])
+    setSelectedNodeId(node.id)
     setDirty(true)
   }, [])
+
+  const addNode = useCallback(
+    (kind: WorkflowNodeKind) => {
+      const offset = rfNodes.length * 28
+      insertNode(kind, { x: 360 + (offset % 180), y: 140 + offset })
+    },
+    [insertNode, rfNodes.length]
+  )
+
+  const onPaletteDragStart = useCallback((event: DragEvent, kind: WorkflowNodeKind) => {
+    event.dataTransfer.setData(DND_MIME, kind)
+    event.dataTransfer.effectAllowed = 'move'
+  }, [])
+
+  const onCanvasDragOver = useCallback((event: DragEvent) => {
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+  }, [])
+
+  const onCanvasDrop = useCallback(
+    (event: DragEvent) => {
+      event.preventDefault()
+      const kind = event.dataTransfer.getData(DND_MIME) as WorkflowNodeKind
+      if (!kind || !WORKFLOW_PALETTE.includes(kind)) return
+      const position = screenToFlowPosition({ x: event.clientX, y: event.clientY })
+      insertNode(kind, position)
+    },
+    [insertNode, screenToFlowPosition]
+  )
 
   const handleNodeChange = useCallback((updated: WorkflowNodeV1) => {
     setRfNodes((nodes) =>
@@ -119,6 +161,17 @@ function WorkflowEditorInner({
     setRfNodes((nodes) => nodes.filter((node) => node.id !== nodeId))
     setRfEdges((edges) => edges.filter((edge) => edge.source !== nodeId && edge.target !== nodeId))
     setSelectedNodeId((current) => (current === nodeId ? null : current))
+    setDirty(true)
+  }, [])
+
+  const handleToggleDisabled = useCallback((nodeId: string) => {
+    setRfNodes((nodes) =>
+      nodes.map((node) =>
+        node.id === nodeId
+          ? { ...node, data: { node: { ...node.data.node, disabled: !node.data.node.disabled } } }
+          : node
+      )
+    )
     setDirty(true)
   }, [])
 
@@ -142,6 +195,24 @@ function WorkflowEditorInner({
     setDirty(false)
     await onRun()
   }, [buildGraph, onPersist, onRun])
+
+  const handleRunNode = useCallback(
+    async (nodeId: string) => {
+      await onPersist(buildGraph())
+      setDirty(false)
+      await onRunNode(nodeId)
+    },
+    [buildGraph, onPersist, onRunNode]
+  )
+
+  const nodeActions = useMemo<WorkflowNodeActions>(
+    () => ({
+      runNode: (nodeId) => void handleRunNode(nodeId),
+      toggleDisabled: handleToggleDisabled,
+      deleteNode: handleDeleteNode
+    }),
+    [handleDeleteNode, handleRunNode, handleToggleDisabled]
+  )
 
   return (
     <div className="fixed inset-0 z-[60] flex flex-col bg-ds-main">
@@ -205,7 +276,7 @@ function WorkflowEditorInner({
       </header>
 
       <div className="flex min-h-0 flex-1">
-        <aside className="flex w-[180px] shrink-0 flex-col gap-1 overflow-y-auto border-r border-ds-border bg-ds-card/40 px-2 py-3">
+        <aside className="flex w-[184px] shrink-0 flex-col gap-1 overflow-y-auto border-r border-ds-border bg-ds-card/40 px-2 py-3">
           <span className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-ds-faint">
             {t('workflowPalette')}
           </span>
@@ -215,8 +286,10 @@ function WorkflowEditorInner({
               <button
                 key={kind}
                 type="button"
+                draggable
+                onDragStart={(event) => onPaletteDragStart(event, kind)}
                 onClick={() => addNode(kind)}
-                className="flex items-center gap-2 rounded-lg border border-transparent px-2 py-2 text-left text-[12.5px] text-ds-ink transition hover:border-ds-border hover:bg-ds-hover"
+                className="flex cursor-grab items-center gap-2 rounded-lg border border-transparent px-2 py-2 text-left text-[12.5px] text-ds-ink transition hover:border-ds-border hover:bg-ds-hover active:cursor-grabbing"
               >
                 <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-accent/10 text-accent">
                   <Icon className="h-3.5 w-3.5" strokeWidth={1.9} />
@@ -228,32 +301,41 @@ function WorkflowEditorInner({
           })}
         </aside>
 
-        <div className="relative min-w-0 flex-1">
+        <div className="relative min-w-0 flex-1" onDrop={onCanvasDrop} onDragOver={onCanvasDragOver}>
           <WorkflowRunStatusContext.Provider value={runStatus}>
-            <ReactFlow
-              className="ds-workflow-canvas"
-              nodes={rfNodes}
-              edges={styledEdges}
-              nodeTypes={workflowNodeTypes}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              onConnect={onConnect}
-              onNodeClick={(_, node) => setSelectedNodeId(node.id)}
-              onPaneClick={() => setSelectedNodeId(null)}
-              fitView
-              proOptions={{ hideAttribution: true }}
-            >
-              <Background variant={BackgroundVariant.Dots} gap={18} size={1} />
-              <Controls showInteractive={false} />
-              <MiniMap pannable zoomable />
-            </ReactFlow>
+            <WorkflowNodeActionsContext.Provider value={nodeActions}>
+              <ReactFlow
+                className="ds-workflow-canvas"
+                nodes={rfNodes}
+                edges={styledEdges}
+                nodeTypes={workflowNodeTypes}
+                onNodesChange={onNodesChange}
+                onEdgesChange={onEdgesChange}
+                onConnect={onConnect}
+                onNodeClick={(_, node) => setSelectedNodeId(node.id)}
+                onPaneClick={() => setSelectedNodeId(null)}
+                fitView
+                proOptions={{ hideAttribution: true }}
+              >
+                <Background variant={BackgroundVariant.Dots} gap={18} size={1} />
+                <Controls showInteractive={false} />
+                <MiniMap pannable zoomable />
+              </ReactFlow>
+            </WorkflowNodeActionsContext.Provider>
           </WorkflowRunStatusContext.Provider>
+          {rfNodes.length === 0 ? (
+            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-2 text-center">
+              <MousePointerClick className="h-8 w-8 text-ds-faint" strokeWidth={1.4} />
+              <p className="text-[13px] text-ds-faint">{t('workflowEmptyCanvas')}</p>
+            </div>
+          ) : null}
         </div>
 
         <aside className="flex w-[320px] shrink-0 flex-col overflow-hidden border-l border-ds-border bg-ds-card/40">
           <NodeConfigPanel
             node={selectedNode}
             settings={settings}
+            lastResult={selectedNodeId ? lastResults[selectedNodeId] ?? null : null}
             onChange={handleNodeChange}
             onDelete={handleDeleteNode}
           />

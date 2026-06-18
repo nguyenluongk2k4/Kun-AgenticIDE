@@ -233,4 +233,57 @@ describe('WorkflowRuntime end-to-end execution', () => {
 
     runtime.stop()
   }, 15_000)
+
+  it('set-fields node shapes JSON and interpolates the upstream output', async () => {
+    const runtimeRequest = vi.fn(async (_settings: AppSettingsV1, pathAndQuery: string) => {
+      if (pathAndQuery === '/v1/threads') return { ok: true, status: 200, body: JSON.stringify({ id: 'thread-1' }) }
+      if (pathAndQuery.includes('/turns')) return { ok: true, status: 200, body: JSON.stringify({ turn: { id: 'turn-1' } }) }
+      if (pathAndQuery.startsWith('/v1/threads/')) {
+        return {
+          ok: true,
+          status: 200,
+          body: JSON.stringify({
+            turns: [{ id: 'turn-1', status: 'completed', items: [{ kind: 'assistant_text', text: 'WORLD', turnId: 'turn-1' }] }]
+          })
+        }
+      }
+      return { ok: false, status: 404, body: '{}' }
+    })
+
+    const workflow = buildWorkflow({
+      id: 'wf-set',
+      name: 'Set',
+      enabled: true,
+      nodes: [
+        { id: 'm', type: 'manual-trigger', config: {} },
+        { id: 'a', type: 'ai-agent', config: { prompt: 'hi', model: 'test-model' } },
+        {
+          id: 's',
+          type: 'set-fields',
+          config: { fields: [{ key: 'greeting', value: 'hello {{text}}' }, { key: 'fixed', value: 'x' }], keepIncoming: false }
+        }
+      ],
+      connections: [
+        { id: 'e1', source: 'm', sourceHandle: 'out', target: 'a', targetHandle: 'in' },
+        { id: 'e2', source: 'a', sourceHandle: 'out', target: 's', targetHandle: 'in' }
+      ]
+    })
+
+    const store = createStore(settingsWithWorkflows([workflow]))
+    const runtime = createWorkflowRuntime({ store: store as never, runtimeRequest: runtimeRequest as never, logError: vi.fn() })
+
+    const runId = requireOk(await runtime.runWorkflow('wf-set'))
+    await waitFor(async () => {
+      const run = (await store.load()).workflow.workflows[0].runs.find((entry) => entry.id === runId)
+      return Boolean(run && run.status !== 'running')
+    }, 10_000)
+
+    const run = store.read().workflow.workflows[0].runs.find((entry) => entry.id === runId)!
+    expect(run.status).toBe('success')
+    const setResult = run.nodeResults.find((result) => result.nodeId === 's')!
+    const output = JSON.parse(setResult.outputJson) as Record<string, unknown>
+    expect(output).toEqual({ greeting: 'hello WORLD', fixed: 'x' })
+
+    runtime.stop()
+  }, 15_000)
 })

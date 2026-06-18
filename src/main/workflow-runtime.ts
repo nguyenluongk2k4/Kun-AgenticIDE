@@ -668,6 +668,17 @@ export class WorkflowRuntime {
         const matched = evaluateCondition(node.config, payload)
         return { payload, message: matched ? 'true' : 'false', branch: matched ? 'true' : 'false' }
       }
+      case 'set-fields': {
+        const base =
+          node.config.keepIncoming && payload.json && typeof payload.json === 'object' && !Array.isArray(payload.json)
+            ? { ...(payload.json as Record<string, unknown>) }
+            : {}
+        for (const field of node.config.fields) {
+          if (field.key.trim()) base[field.key.trim()] = interpolate(field.value, payload)
+        }
+        const json = base
+        return { payload: { json, text: safeJson(json) }, message: `${node.config.fields.length} fields` }
+      }
       case 'http-request':
         return runHttpNode(node.config, payload)
       case 'delay':

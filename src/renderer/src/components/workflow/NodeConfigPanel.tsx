@@ -7,6 +7,7 @@ import {
   type AppSettingsV1,
   type WorkflowConditionOperator,
   type WorkflowHttpMethod,
+  type WorkflowNodeRunResultV1,
   type WorkflowNodeV1,
   type WorkflowTriggerScheduleKind
 } from '@shared/app-settings'
@@ -34,6 +35,7 @@ const CONDITION_OPERATORS: WorkflowConditionOperator[] = [
 type Props = {
   node: WorkflowNodeV1 | null
   settings: AppSettingsV1
+  lastResult?: WorkflowNodeRunResultV1 | null
   onChange: (node: WorkflowNodeV1) => void
   onDelete: (nodeId: string) => void
 }
@@ -47,7 +49,7 @@ function Field({ label, children }: { label: string; children: ReactNode }): Rea
   )
 }
 
-export function NodeConfigPanel({ node, settings, onChange, onDelete }: Props): ReactElement {
+export function NodeConfigPanel({ node, settings, lastResult, onChange, onDelete }: Props): ReactElement {
   const { t } = useTranslation('common')
 
   if (!node) {
@@ -306,6 +308,72 @@ export function NodeConfigPanel({ node, settings, onChange, onDelete }: Props): 
           </>
         ) : null}
 
+        {node.type === 'set-fields' ? (
+          <>
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[12px] font-medium text-ds-muted">{t('workflowFields')}</span>
+                <button
+                  type="button"
+                  className="text-[12px] font-medium text-accent hover:underline"
+                  onClick={() =>
+                    onChange({ ...node, config: { ...node.config, fields: [...node.config.fields, { key: '', value: '' }] } })
+                  }
+                >
+                  + {t('workflowAddField')}
+                </button>
+              </div>
+              {node.config.fields.map((field, index) => (
+                <div key={index} className="flex items-center gap-2">
+                  <input
+                    className={INPUT_CLASS}
+                    placeholder={t('workflowFieldKey')}
+                    value={field.key}
+                    onChange={(event) => {
+                      const fields = node.config.fields.map((item, idx) =>
+                        idx === index ? { ...item, key: event.target.value } : item
+                      )
+                      onChange({ ...node, config: { ...node.config, fields } })
+                    }}
+                  />
+                  <input
+                    className={INPUT_CLASS}
+                    placeholder={t('workflowFieldValue')}
+                    value={field.value}
+                    onChange={(event) => {
+                      const fields = node.config.fields.map((item, idx) =>
+                        idx === index ? { ...item, value: event.target.value } : item
+                      )
+                      onChange({ ...node, config: { ...node.config, fields } })
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="shrink-0 text-ds-faint hover:text-red-500"
+                    onClick={() => {
+                      const fields = node.config.fields.filter((_, idx) => idx !== index)
+                      onChange({ ...node, config: { ...node.config, fields } })
+                    }}
+                    aria-label={t('workflowDeleteNode')}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" strokeWidth={1.8} />
+                  </button>
+                </div>
+              ))}
+            </div>
+            <label className="flex items-center gap-2 text-[13px] text-ds-ink">
+              <input
+                type="checkbox"
+                checked={node.config.keepIncoming}
+                onChange={(event) =>
+                  onChange({ ...node, config: { ...node.config, keepIncoming: event.target.checked } })
+                }
+              />
+              {t('workflowKeepIncoming')}
+            </label>
+          </>
+        ) : null}
+
         {node.type === 'http-request' ? (
           <>
             <Field label={t('workflowHttpMethod')}>
@@ -434,6 +502,15 @@ export function NodeConfigPanel({ node, settings, onChange, onDelete }: Props): 
           />
           {t('workflowNodeDisabled')}
         </label>
+
+        {lastResult && (lastResult.message || lastResult.error || lastResult.outputJson) ? (
+          <div className="flex flex-col gap-1.5 border-t border-ds-border pt-3">
+            <span className="text-[12px] font-medium text-ds-muted">{t('workflowLastOutput')}</span>
+            <pre className="max-h-44 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-ds-subtle px-3 py-2 text-[11.5px] leading-5 text-ds-muted">
+              {lastResult.error || lastResult.message || lastResult.outputJson}
+            </pre>
+          </div>
+        ) : null}
       </div>
     </div>
   )
