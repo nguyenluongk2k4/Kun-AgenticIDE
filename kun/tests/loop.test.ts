@@ -2112,6 +2112,12 @@ describe('AgentLoop', () => {
     await h.loop.runTurn(h.threadId, h.turnId)
     const items = await h.sessionStore.loadItems(h.threadId)
     expect(items.some((item) => item.kind === 'compaction')).toBe(true)
+    // The folded history is rewritten to "summary marker FIRST, then the recent
+    // items kept verbatim" (codex-style), so the marker leads and the old head
+    // is dropped from the session log rather than the marker being appended
+    // after the full history (which left only the summary on the next turn).
+    expect(items[0]?.kind).toBe('compaction')
+    expect(items.length).toBeLessThan(11)
   })
 
   it('can use a model summary for history compaction while reusing the main prefix', async () => {

@@ -2115,13 +2115,16 @@ export class AgentLoop {
         })
       }
     }
-    // Persist the new compaction summary so the on-disk history
-    // reflects the folded state. SSE subscribers see the event
-    // through the event bus; the store append is async and safe to
-    // skip when no items need summarisation.
+    // Persist the folded history (summary marker FOLLOWED BY the recent items
+    // kept verbatim) so subsequent turns re-send the same compacted context.
+    // Previously we only appended the marker after the full on-disk log, so the
+    // kept tail sat *before* the marker and was dropped by
+    // effectiveHistoryAfterLatestCompaction on the next turn — leaving only the
+    // summary. Rewriting to result.next keeps "summary + recent verbatim"
+    // (codex-style) on disk. SSE subscribers still see the event.
     if (result.replacedTokens > 0) {
       this.opts.toolHost.clearReadTracker?.(threadId)
-      await this.opts.sessionStore.appendItem(threadId, result.summaryItem)
+      await this.opts.sessionStore.rewriteItems(threadId, result.next)
       await this.opts.events.record({
         kind: 'compaction_completed',
         threadId,

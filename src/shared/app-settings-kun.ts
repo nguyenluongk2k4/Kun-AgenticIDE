@@ -277,7 +277,10 @@ export function defaultKunContextCompactionSettings(): KunContextCompactionSetti
   return {
     defaultSoftThreshold: 16_000,
     defaultHardThreshold: 24_000,
-    summaryMode: 'heuristic',
+    // Default to model-generated summaries (codex-style): the model writes a
+    // structured recap of the folded turns instead of a mechanical item list.
+    // Falls back to the heuristic summary automatically on timeout/failure.
+    summaryMode: 'model',
     summaryTimeoutMs: 15_000,
     summaryMaxTokens: 1_200,
     summaryInputMaxBytes: 96 * 1024

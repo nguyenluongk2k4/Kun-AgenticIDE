@@ -183,7 +183,12 @@ export class TurnService {
         itemId: result.summaryItem.id,
         auto: false
       })
+      // appendItem records the marker into the thread store (so the timeline
+      // shows it on reload); the rewrite then collapses the *session* history to
+      // "summary marker + recent verbatim tail" so the kept tail survives into
+      // the next turn instead of being dropped to summary-only.
       await this.appendItem(input.threadId, result.summaryItem)
+      await this.deps.sessionStore.rewriteItems(input.threadId, result.next)
       await this.deps.events.record({
         kind: 'compaction_completed',
         threadId: input.threadId,
