@@ -575,7 +575,7 @@ describe('KunRuntimeProvider', () => {
           })
         }
       }
-      if (path === '/v1/memory/mem_1' && method === 'PATCH') {
+      if (path === '/v1/memory/mem_1?workspace=%2Ftmp%2Fworkspace' && method === 'PATCH') {
         expect(body).toBe(JSON.stringify({ disabled: true }))
         return {
           ok: true,
@@ -592,7 +592,7 @@ describe('KunRuntimeProvider', () => {
           })
         }
       }
-      if (path === '/v1/memory/mem_1' && method === 'DELETE') {
+      if (path === '/v1/memory/mem_1?workspace=%2Ftmp%2Fworkspace' && method === 'DELETE') {
         return {
           ok: true,
           status: 200,
@@ -614,11 +614,11 @@ describe('KunRuntimeProvider', () => {
     const provider = new KunRuntimeProvider()
 
     await expect(provider.listMemories({ workspace: '/tmp/workspace', includeDeleted: false })).resolves.toHaveLength(1)
-    await expect(provider.updateMemory('mem_1', { disabled: true })).resolves.toMatchObject({
+    await expect(provider.updateMemory('mem_1', { disabled: true }, { workspace: '/tmp/workspace' })).resolves.toMatchObject({
       id: 'mem_1',
       disabledAt: 't1'
     })
-    await expect(provider.deleteMemory('mem_1')).resolves.toMatchObject({
+    await expect(provider.deleteMemory('mem_1', { workspace: '/tmp/workspace' })).resolves.toMatchObject({
       id: 'mem_1',
       deletedAt: 't2'
     })

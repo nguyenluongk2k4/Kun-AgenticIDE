@@ -687,10 +687,12 @@ export class KunRuntimeProvider implements AgentProvider {
 
   async updateMemory(
     memoryId: string,
-    patch: { content?: string; tags?: string[]; confidence?: number; disabled?: boolean }
+    patch: { content?: string; tags?: string[]; confidence?: number; disabled?: boolean },
+    options: { workspace?: string } = {}
   ): Promise<CoreMemoryRecordJson> {
+    const query = buildQuery({ workspace: options.workspace })
     const response = await rendererRuntimeClient.runtimeRequest(
-      kunMemoryRecordPath(memoryId),
+      `${kunMemoryRecordPath(memoryId)}${query}`,
       'PATCH',
       JSON.stringify(patch)
     )
@@ -703,8 +705,9 @@ export class KunRuntimeProvider implements AgentProvider {
     ).memory
   }
 
-  async deleteMemory(memoryId: string): Promise<CoreMemoryRecordJson> {
-    const response = await rendererRuntimeClient.runtimeRequest(kunMemoryRecordPath(memoryId), 'DELETE')
+  async deleteMemory(memoryId: string, options: { workspace?: string } = {}): Promise<CoreMemoryRecordJson> {
+    const query = buildQuery({ workspace: options.workspace })
+    const response = await rendererRuntimeClient.runtimeRequest(`${kunMemoryRecordPath(memoryId)}${query}`, 'DELETE')
     if (!response.ok) {
       throw runtimeErrorToError(readRuntimeError(response.body, 'failed to delete memory'))
     }
