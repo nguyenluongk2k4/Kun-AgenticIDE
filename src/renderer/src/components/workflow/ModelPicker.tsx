@@ -18,6 +18,8 @@ type Props = {
   modelsOf?: (provider: ModelProviderProfileV1) => string[]
   /** Label for the model field. Default: the generic "Model" label. */
   modelLabel?: string
+  /** Hint shown under the picker when no concrete model is selected (e.g. the runtime fallback). */
+  emptyHint?: string
 }
 
 /** Provider dropdown + a searchable model combobox (handles providers with many models). */
@@ -28,7 +30,8 @@ export function ModelPicker({
   onChange,
   providerFilter,
   modelsOf,
-  modelLabel
+  modelLabel,
+  emptyHint
 }: Props): ReactElement {
   const { t } = useTranslation('common')
   const [open, setOpen] = useState(false)
@@ -100,6 +103,9 @@ export function ModelPicker({
           <ChevronDown className="h-3.5 w-3.5 shrink-0 text-ds-faint" strokeWidth={1.8} />
         </button>
       </label>
+      {emptyHint && (!providerChosen || !model.trim()) ? (
+        <span className="text-[11px] leading-4 text-ds-faint">{emptyHint}</span>
+      ) : null}
 
       {open && rect
         ? createPortal(

@@ -780,6 +780,7 @@ export function NodeConfigPanel({
               providerId={node.config.providerId}
               model={node.config.model}
               onChange={({ providerId, model }) => onChange({ ...node, config: { ...node.config, providerId, model } })}
+              emptyHint={t('workflowModelEmptyHint')}
             />
             <Field label={t('scheduleReasoning')}>
               <select
@@ -1680,6 +1681,7 @@ export function NodeConfigPanel({
               providerId={node.config.providerId}
               model={node.config.model}
               onChange={({ providerId, model }) => onChange({ ...node, config: { ...node.config, providerId, model } })}
+              emptyHint={t('workflowModelEmptyHint')}
             />
             <Field label={t('scheduleReasoning')}>
               <select
@@ -1789,6 +1791,7 @@ export function NodeConfigPanel({
               providerId={node.config.providerId}
               model={node.config.model}
               onChange={({ providerId, model }) => onChange({ ...node, config: { ...node.config, providerId, model } })}
+              emptyHint={t('workflowModelEmptyHint')}
             />
           </>
         ) : null}

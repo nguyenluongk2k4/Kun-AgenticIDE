@@ -1771,7 +1771,7 @@ export class WorkflowRuntime {
           settings,
           {
             providerId: node.config.providerId,
-            model: node.config.model,
+            model: node.config.model.trim() || settings.agents.kun.model,
             reasoningEffort: node.config.reasoningEffort
           },
           settings.workflow.providerId?.trim() || ''
@@ -2079,7 +2079,7 @@ export class WorkflowRuntime {
       case 'parameter-extractor': {
         const modelConfig = resolveScheduleModelConfig(
           settings,
-          { providerId: node.config.providerId, model: node.config.model, reasoningEffort: node.config.reasoningEffort },
+          { providerId: node.config.providerId, model: node.config.model.trim() || settings.agents.kun.model, reasoningEffort: node.config.reasoningEffort },
           settings.workflow.providerId?.trim() || ''
         )
         const workspace =
@@ -2119,7 +2119,7 @@ export class WorkflowRuntime {
         if (categories.length === 0) return { payload, message: 'no categories' }
         const modelConfig = resolveScheduleModelConfig(
           settings,
-          { providerId: node.config.providerId, model: node.config.model, reasoningEffort: node.config.reasoningEffort },
+          { providerId: node.config.providerId, model: node.config.model.trim() || settings.agents.kun.model, reasoningEffort: node.config.reasoningEffort },
           settings.workflow.providerId?.trim() || ''
         )
         const workspace =

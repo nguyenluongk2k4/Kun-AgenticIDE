@@ -203,6 +203,7 @@
   "workflowNodeName": "标签",
   "workflowTriggerWorkspace": "工作目录",
   "workflowTriggerWorkspaceHint": "该创建loop运行时的默认目录（AI／图片／代码节点会用到）。留空则使用应用的工作区。",
+  "workflowModelEmptyHint": "未选择则使用 Kun 当前的默认模型（和对话用的一致）。",
   "workflowNodeInputs": "输入（来自上游）",
   "workflowNodeInputsHint": "给本节点定义带类型的输入，从上游输出取值；在节点里用 $input.键名 引用。点右上角的 { } 按钮可插入上游字段。",
   "workflowNodeInputAdd": "添加输入",

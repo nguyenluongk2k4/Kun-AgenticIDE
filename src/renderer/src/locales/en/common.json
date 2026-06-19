@@ -203,6 +203,7 @@
   "workflowNodeName": "Label",
   "workflowTriggerWorkspace": "Working directory",
   "workflowTriggerWorkspaceHint": "Default folder this Create Loop runs in (used by AI / image / code nodes). Empty uses the app workspace.",
+  "workflowModelEmptyHint": "If unset, uses Kun's current default model (the same one chat uses).",
   "workflowNodeInputs": "Inputs (from upstream)",
   "workflowNodeInputsHint": "Define typed inputs pulled from upstream output; reference them in this node as $input.key. Use the { } button to insert an upstream field.",
   "workflowNodeInputAdd": "Add input",
