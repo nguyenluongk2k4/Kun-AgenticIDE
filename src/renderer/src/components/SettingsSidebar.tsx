@@ -75,13 +75,13 @@ export function SettingsSidebar({
           <Bot className="h-4 w-4 shrink-0 opacity-70" strokeWidth={1.75} />
           {t('agents')}
         </button>
-        <button type="button" className={catCls('archives')} onClick={() => setCategory('archives')}>
-          <Archive className="h-4 w-4 shrink-0 opacity-70" strokeWidth={1.75} />
-          {t('archives')}
-        </button>
         <button type="button" className={catCls('permissions')} onClick={() => setCategory('permissions')}>
           <ShieldCheck className="h-4 w-4 shrink-0 opacity-70" strokeWidth={1.75} />
           {t('permissions')}
+        </button>
+        <button type="button" className={catCls('archives')} onClick={() => setCategory('archives')}>
+          <Archive className="h-4 w-4 shrink-0 opacity-70" strokeWidth={1.75} />
+          {t('archives')}
         </button>
         <button type="button" className={catCls('worktree')} onClick={() => setCategory('worktree')}>
           <GitBranch className="h-4 w-4 shrink-0 opacity-70" strokeWidth={1.75} />

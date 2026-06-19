@@ -99,7 +99,7 @@ describe('ArchivedThreadsSettingsSection', () => {
     expect(html).toContain('Delete archived chat')
   })
 
-  it('places archived chats directly after the AI assistant settings tab', () => {
+  it('places permissions directly after the AI assistant settings tab', () => {
     const html = renderToStaticMarkup(createElement(SettingsSidebar, {
       category: 'archives',
       goBack: () => undefined,
@@ -111,7 +111,7 @@ describe('ArchivedThreadsSettingsSection', () => {
     const archivesIndex = html.indexOf('Archived chats')
     const permissionsIndex = html.indexOf('permissions')
     expect(agentsIndex).toBeGreaterThanOrEqual(0)
-    expect(archivesIndex).toBeGreaterThan(agentsIndex)
-    expect(permissionsIndex).toBeGreaterThan(archivesIndex)
+    expect(permissionsIndex).toBeGreaterThan(agentsIndex)
+    expect(archivesIndex).toBeGreaterThan(permissionsIndex)
   })
 })
