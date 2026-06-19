@@ -869,11 +869,25 @@ export type WorkflowCustomModuleV1 = {
  * back in as the next input, until the stop condition holds or maxIterations is
  * reached. Turns "you press enter each step" into "you set the goal, the loop runs".
  */
+export type WorkflowLoopMode = 'condition' | 'foreach'
+export type WorkflowLoopExecution = 'sequential' | 'parallel'
+
 export type WorkflowLoopConfigV1 = {
   /** id of the workflow run once per iteration. */
   workflowId: string
+  /** 'condition' (while-loop, default) or 'foreach' (iterate an array). */
+  mode?: WorkflowLoopMode
+  /** foreach: expression resolving to the array to iterate (empty = the incoming payload json). */
+  arraySource?: string
+  /** foreach: run items one-at-a-time or concurrently. */
+  execution?: WorkflowLoopExecution
+  /** foreach: max concurrent iterations when execution = 'parallel' (1-8). */
+  concurrency?: number
+  /** foreach: collect failed items as { error } instead of aborting the loop. */
+  continueOnError?: boolean
+  /** Caps iterations (condition mode) and array length (foreach mode). */
   maxIterations: number
-  /** Stop-when condition evaluated against each iteration's output. */
+  /** Stop-when condition evaluated against each iteration's output (condition mode). */
   leftExpr: string
   operator: WorkflowConditionOperator
   rightValue: string

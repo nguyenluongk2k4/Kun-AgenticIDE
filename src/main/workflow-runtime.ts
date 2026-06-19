@@ -688,6 +688,27 @@ function extractJsonObject(raw: string): Record<string, unknown> | null {
   return match ? tryParse(match[0]) : null
 }
 
+/** Run `fn` over items with at most `limit` in flight, preserving result order. */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length)
+  let cursor = 0
+  const workerCount = Math.max(1, Math.min(limit, items.length))
+  const workers = Array.from({ length: workerCount }, async () => {
+    for (;;) {
+      const index = cursor
+      cursor += 1
+      if (index >= items.length) break
+      results[index] = await fn(items[index], index)
+    }
+  })
+  await Promise.all(workers)
+  return results
+}
+
 /** Coerce a workflow's env vars into a {{$env.key}} lookup (secrets are plain values here). */
 function resolveEnv(env: WorkflowEnvVarV1[]): Record<string, unknown> {
   const out: Record<string, unknown> = {}
@@ -1595,6 +1616,47 @@ export class WorkflowRuntime {
           target.nodes.find((item) => item.type === 'schedule-trigger') ??
           target.nodes.find((item) => item.type === 'webhook-trigger')
         if (!trigger) throw new Error('Loop body has no trigger node.')
+        if (node.config.mode === 'foreach') {
+          // for-each: iterate an array, running the body once per item, optionally
+          // in parallel. Each iteration sees $loop.index / $loop.item / $loop.total.
+          const source = node.config.arraySource?.trim()
+          const raw = source ? resolveExpr(payload, source, scope) : payload.json
+          const items = (Array.isArray(raw) ? raw : []).slice(0, node.config.maxIterations)
+          const total = items.length
+          const runItem = async (item: unknown, index: number): Promise<unknown> => {
+            const itemPayload: WorkflowPayload = {
+              json: item,
+              text: typeof item === 'string' ? item : safeJson(item)
+            }
+            try {
+              const result = await this.runGraph(target, trigger.id, itemPayload, {
+                settings,
+                depth: depth + 1,
+                loop: { index, item, total }
+              })
+              if (result.status === 'error') throw new Error(result.errorMessage || 'Loop item failed.')
+              return result.output.json
+            } catch (error) {
+              if (node.config.continueOnError) return { error: error instanceof Error ? error.message : String(error) }
+              throw error
+            }
+          }
+          const outputs =
+            node.config.execution === 'parallel'
+              ? await mapWithConcurrency(items, node.config.concurrency ?? 4, runItem)
+              : await (async (): Promise<unknown[]> => {
+                  const acc: unknown[] = []
+                  for (let index = 0; index < items.length; index += 1) acc.push(await runItem(items[index], index))
+                  return acc
+                })()
+          const failures = outputs.filter(
+            (value) => value && typeof value === 'object' && 'error' in (value as Record<string, unknown>)
+          ).length
+          return {
+            payload: { json: outputs, text: safeJson(outputs) },
+            message: `foreach ${total - failures}/${total}${node.config.execution === 'parallel' ? ' (parallel)' : ''}`
+          }
+        }
         const stopCondition = {
           leftExpr: node.config.leftExpr,
           operator: node.config.operator,
@@ -1607,8 +1669,12 @@ export class WorkflowRuntime {
         let iterations = 0
         let done = false
         while (iterations < node.config.maxIterations) {
+          const result = await this.runGraph(target, trigger.id, current, {
+            settings,
+            depth: depth + 1,
+            loop: { index: iterations, item: current.json, total: node.config.maxIterations }
+          })
           iterations += 1
-          const result = await this.runGraph(target, trigger.id, current, { settings, depth: depth + 1 })
           if (result.status === 'error') throw new Error(result.errorMessage || 'Loop body failed.')
           current = result.output
           if (evaluateCondition(stopCondition, current, scope)) {

@@ -587,6 +587,61 @@ describe('WorkflowRuntime end-to-end execution', () => {
     runtime.stop()
   }, 15_000)
 
+  it('loop foreach (parallel) maps each array item through the body, preserving order', async () => {
+    const body = buildWorkflow({
+      id: 'fe-body',
+      name: 'FeBody',
+      enabled: true,
+      nodes: [
+        { id: 'bm', type: 'manual-trigger', config: {} },
+        { id: 'bs', type: 'set-fields', config: { fields: [{ key: 'out', value: '{{$loop.item}}!' }], keepIncoming: false } }
+      ],
+      connections: [{ id: 'be1', source: 'bm', sourceHandle: 'out', target: 'bs', targetHandle: 'in' }]
+    })
+    const parent = buildWorkflow({
+      id: 'fe-parent',
+      name: 'FeParent',
+      enabled: true,
+      nodes: [
+        { id: 'm', type: 'manual-trigger', config: {} },
+        { id: 'arr', type: 'code', config: { code: "return ['a', 'b', 'c']" } },
+        {
+          id: 'lp',
+          type: 'loop',
+          config: {
+            workflowId: 'fe-body',
+            mode: 'foreach',
+            execution: 'parallel',
+            concurrency: 3,
+            maxIterations: 10,
+            leftExpr: '',
+            operator: 'equals',
+            rightValue: '',
+            caseSensitive: false
+          }
+        }
+      ],
+      connections: [
+        { id: 'e1', source: 'm', sourceHandle: 'out', target: 'arr', targetHandle: 'in' },
+        { id: 'e2', source: 'arr', sourceHandle: 'out', target: 'lp', targetHandle: 'in' }
+      ]
+    })
+    const store = createStore(settingsWithWorkflows([body, parent]))
+    const runtime = createWorkflowRuntime({ store: store as never, runtimeRequest: vi.fn() as never, logError: vi.fn() })
+    const runId = requireOk(await runtime.runWorkflow('fe-parent'))
+    await waitFor(async () => {
+      const run = (await store.load()).workflow.workflows
+        .find((wf) => wf.id === 'fe-parent')!
+        .runs.find((entry) => entry.id === runId)
+      return Boolean(run && run.status !== 'running')
+    }, 10_000)
+    const run = store.read().workflow.workflows.find((wf) => wf.id === 'fe-parent')!.runs.find((entry) => entry.id === runId)!
+    expect(run.status).toBe('success')
+    const loop = run.nodeResults.find((result) => result.nodeId === 'lp')!
+    expect(JSON.parse(loop.outputJson)).toEqual([{ out: 'a!' }, { out: 'b!' }, { out: 'c!' }])
+    runtime.stop()
+  }, 15_000)
+
   it('sort orders the upstream array by a numeric field', async () => {
     const store = createStore(
       settingsWithWorkflows([

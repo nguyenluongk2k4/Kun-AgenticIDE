@@ -130,7 +130,9 @@ function nodeSummary(node: WorkflowNodeV1): string {
     case 'merge':
       return node.config.mode
     case 'loop':
-      return `≤${node.config.maxIterations}×`
+      return node.config.mode === 'foreach'
+        ? `foreach${node.config.execution === 'parallel' ? ` ∥${node.config.concurrency ?? 4}` : ''}`
+        : `≤${node.config.maxIterations}×`
     case 'delay':
       return `${Math.round(node.config.delayMs / 1000)}s`
     case 'template':

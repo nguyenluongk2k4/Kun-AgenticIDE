@@ -17,8 +17,15 @@ function makeWorkflow(): WorkflowV1 {
         { key: 'TOKEN', value: 's3cr3t', type: 'secret' }
       ],
       nodes: [
-        { id: 'm', type: 'manual-trigger', name: '', position: { x: 0, y: 0 }, disabled: false, config: {} },
-        { id: 'o', type: 'output', name: '', position: { x: 200, y: 0 }, disabled: false, config: { mode: 'auto' } }
+        { id: 'm', type: 'manual-trigger', name: '', position: { x: 0, y: 0 }, disabled: false, config: { workspaceRoot: '' } },
+        {
+          id: 'o',
+          type: 'output',
+          name: '',
+          position: { x: 200, y: 0 },
+          disabled: false,
+          config: { mode: 'auto', textTemplate: '', jsonPath: '' }
+        }
       ],
       connections: [{ id: 'e1', source: 'm', sourceHandle: 'out', target: 'o', targetHandle: 'in' }],
       runs: [

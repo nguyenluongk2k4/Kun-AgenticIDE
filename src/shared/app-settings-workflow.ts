@@ -382,6 +382,11 @@ export function normalizeWorkflowNode(value: unknown, index: number): WorkflowNo
         type: 'loop',
         config: {
           workflowId: asTrimmed(config.workflowId),
+          mode: config.mode === 'foreach' ? 'foreach' : 'condition',
+          arraySource: asText(config.arraySource),
+          execution: config.execution === 'parallel' ? 'parallel' : 'sequential',
+          concurrency: normalizePositiveInteger(config.concurrency, 4, 1, 8),
+          continueOnError: normalizeBoolean(config.continueOnError, false),
           maxIterations: normalizePositiveInteger(config.maxIterations, 10, 1, 100),
           leftExpr: asText(config.leftExpr),
           operator: normalizeConditionOperator(config.operator),

@@ -142,7 +142,19 @@ export function createWorkflowNode(
       return {
         ...base,
         type: 'loop',
-        config: { workflowId: '', maxIterations: 10, leftExpr: 'json.done', operator: 'equals', rightValue: 'true', caseSensitive: false }
+        config: {
+          workflowId: '',
+          mode: 'condition',
+          arraySource: '',
+          execution: 'sequential',
+          concurrency: 4,
+          continueOnError: false,
+          maxIterations: 10,
+          leftExpr: 'json.done',
+          operator: 'equals',
+          rightValue: 'true',
+          caseSensitive: false
+        }
       }
     case 'http-request':
       return {

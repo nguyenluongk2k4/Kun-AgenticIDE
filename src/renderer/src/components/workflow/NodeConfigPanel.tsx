@@ -1015,6 +1015,18 @@ export function NodeConfigPanel({
                 ))}
               </select>
             </Field>
+            <Field label={t('workflowLoopMode')}>
+              <select
+                className={INPUT_CLASS}
+                value={node.config.mode ?? 'condition'}
+                onChange={(event) =>
+                  onChange({ ...node, config: { ...node.config, mode: event.target.value === 'foreach' ? 'foreach' : 'condition' } })
+                }
+              >
+                <option value="condition">{t('workflowLoopMode_condition')}</option>
+                <option value="foreach">{t('workflowLoopMode_foreach')}</option>
+              </select>
+            </Field>
             <Field label={t('workflowLoopMax')}>
               <input
                 type="number"
@@ -1030,32 +1042,87 @@ export function NodeConfigPanel({
                 }
               />
             </Field>
-            <span className="text-[12px] font-medium text-ds-muted">{t('workflowLoopStopWhen')}</span>
-            <input
-              className={INPUT_CLASS}
-              placeholder={t('workflowConditionLeftPlaceholder')}
-              value={node.config.leftExpr}
-              onChange={(event) => onChange({ ...node, config: { ...node.config, leftExpr: event.target.value } })}
-            />
-            <select
-              className={INPUT_CLASS}
-              value={node.config.operator}
-              onChange={(event) =>
-                onChange({ ...node, config: { ...node.config, operator: event.target.value as WorkflowConditionOperator } })
-              }
-            >
-              {CONDITION_OPERATORS.map((operator) => (
-                <option key={operator} value={operator}>
-                  {t(`workflowOp_${operator}`)}
-                </option>
-              ))}
-            </select>
-            <input
-              className={INPUT_CLASS}
-              placeholder={t('workflowConditionValue')}
-              value={node.config.rightValue}
-              onChange={(event) => onChange({ ...node, config: { ...node.config, rightValue: event.target.value } })}
-            />
+            {(node.config.mode ?? 'condition') === 'foreach' ? (
+              <>
+                <Field label={t('workflowLoopArraySource')} hint={t('workflowLoopArraySourceHint')}>
+                  <input
+                    className={INPUT_CLASS}
+                    placeholder="{{json.items}}"
+                    value={node.config.arraySource ?? ''}
+                    onChange={(event) => onChange({ ...node, config: { ...node.config, arraySource: event.target.value } })}
+                  />
+                </Field>
+                <Field label={t('workflowLoopExecution')}>
+                  <select
+                    className={INPUT_CLASS}
+                    value={node.config.execution ?? 'sequential'}
+                    onChange={(event) =>
+                      onChange({
+                        ...node,
+                        config: { ...node.config, execution: event.target.value === 'parallel' ? 'parallel' : 'sequential' }
+                      })
+                    }
+                  >
+                    <option value="sequential">{t('workflowLoopExecution_sequential')}</option>
+                    <option value="parallel">{t('workflowLoopExecution_parallel')}</option>
+                  </select>
+                </Field>
+                {(node.config.execution ?? 'sequential') === 'parallel' ? (
+                  <Field label={t('workflowLoopConcurrency')}>
+                    <input
+                      type="number"
+                      min={1}
+                      max={8}
+                      className={INPUT_CLASS}
+                      value={node.config.concurrency ?? 4}
+                      onChange={(event) =>
+                        onChange({
+                          ...node,
+                          config: { ...node.config, concurrency: Math.max(1, Math.min(8, Number(event.target.value) || 1)) }
+                        })
+                      }
+                    />
+                  </Field>
+                ) : null}
+                <label className="flex items-center gap-2 text-[12px] text-ds-muted">
+                  <input
+                    type="checkbox"
+                    checked={node.config.continueOnError ?? false}
+                    onChange={(event) => onChange({ ...node, config: { ...node.config, continueOnError: event.target.checked } })}
+                  />
+                  {t('workflowLoopContinueOnError')}
+                </label>
+              </>
+            ) : (
+              <>
+                <span className="text-[12px] font-medium text-ds-muted">{t('workflowLoopStopWhen')}</span>
+                <input
+                  className={INPUT_CLASS}
+                  placeholder={t('workflowConditionLeftPlaceholder')}
+                  value={node.config.leftExpr}
+                  onChange={(event) => onChange({ ...node, config: { ...node.config, leftExpr: event.target.value } })}
+                />
+                <select
+                  className={INPUT_CLASS}
+                  value={node.config.operator}
+                  onChange={(event) =>
+                    onChange({ ...node, config: { ...node.config, operator: event.target.value as WorkflowConditionOperator } })
+                  }
+                >
+                  {CONDITION_OPERATORS.map((operator) => (
+                    <option key={operator} value={operator}>
+                      {t(`workflowOp_${operator}`)}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  className={INPUT_CLASS}
+                  placeholder={t('workflowConditionValue')}
+                  value={node.config.rightValue}
+                  onChange={(event) => onChange({ ...node, config: { ...node.config, rightValue: event.target.value } })}
+                />
+              </>
+            )}
           </>
         ) : null}
 

@@ -878,6 +878,11 @@ const workflowSubWorkflowConfigSchema = z
 const workflowLoopConfigSchema = z
   .object({
     workflowId: z.string().max(MAX_ID_LENGTH).optional(),
+    mode: z.enum(['condition', 'foreach']).optional(),
+    arraySource: z.string().max(2_000).optional(),
+    execution: z.enum(['sequential', 'parallel']).optional(),
+    concurrency: z.number().int().min(1).max(8).optional(),
+    continueOnError: z.boolean().optional(),
     maxIterations: z.number().int().min(1).max(100).optional(),
     leftExpr: z.string().max(2_000).optional(),
     operator: workflowConditionOperatorSchema.optional(),
