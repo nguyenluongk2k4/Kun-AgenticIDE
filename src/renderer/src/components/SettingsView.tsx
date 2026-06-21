@@ -24,7 +24,13 @@ import type {
   CoreRuntimeToolDiagnosticsJson
 } from '../agent/kun-contract'
 import type { WriteInlineCompletionDebugEntry } from '@shared/write-inline-completion'
-import { applyCursorSpotlight, applyTheme, applyUiFontScale, applyWriteTypography } from '../lib/apply-theme'
+import {
+  applyCursorSpotlight,
+  applyCursorSpotlightColor,
+  applyTheme,
+  applyUiFontScale,
+  applyWriteTypography
+} from '../lib/apply-theme'
 import { formatWorkspacePickerError } from '../lib/format-workspace-picker-error'
 import type { SkillRootListItem } from '@shared/kun-gui-api'
 import { normalizeWorkspaceRoot } from '../lib/workspace-path'
@@ -144,6 +150,7 @@ export function SettingsView(): ReactElement {
   const formPort = formKun?.port
   const formGuiUpdateChannel = form?.guiUpdate?.channel
   const formCursorSpotlight = form?.cursorSpotlight
+  const formCursorSpotlightColor = form?.cursorSpotlightColor
   const settingsPlatform = typeof window !== 'undefined' ? window.kunGui?.platform ?? '' : ''
   const settingsHomeDir = typeof window !== 'undefined' ? window.kunGui?.homeDir ?? '' : ''
   const compactHomePath = useCallback((value: string): string =>
@@ -202,7 +209,8 @@ export function SettingsView(): ReactElement {
     if (typeof formCursorSpotlight === 'boolean') {
       applyCursorSpotlight(formCursorSpotlight)
     }
-  }, [formCursorSpotlight])
+    applyCursorSpotlightColor(formCursorSpotlightColor)
+  }, [formCursorSpotlight, formCursorSpotlightColor])
 
   // Live-preview the Write editor typography as the form changes, mirroring the
   // theme/scale preview above. Keyed on the scalar fields so it only re-applies

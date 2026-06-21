@@ -89,8 +89,12 @@
   --ds-scrollbar-thumb: rgba(84, 103, 140, 0.24);
   --ds-scrollbar-thumb-hover: rgba(84, 103, 140, 0.34);
   --ds-selection: rgba(59, 130, 216, 0.2);
-  --ds-cursor-spotlight: rgba(133, 193, 241, 0.28);
-  --ds-cursor-spotlight-edge: rgba(108, 162, 221, 0.1);
+  --ds-cursor-spotlight-rgb: 133 193 241;
+  --ds-cursor-spotlight-edge-rgb: 108 162 221;
+  --ds-cursor-spotlight-dark-rgb: 111 176 232;
+  --ds-cursor-spotlight-dark-edge-rgb: 151 192 235;
+  --ds-cursor-spotlight: rgb(var(--ds-cursor-spotlight-rgb) / 0.28);
+  --ds-cursor-spotlight-edge: rgb(var(--ds-cursor-spotlight-edge-rgb) / 0.1);
   --ds-shadow-card-soft: 0 10px 28px rgba(20, 47, 95, 0.06);
   --ds-shadow-card-strong: 0 14px 36px rgba(20, 47, 95, 0.09);
   --ds-shadow-chip: inset 0 1px 0 rgba(255, 255, 255, 0.78);
@@ -200,8 +204,8 @@
   --ds-scrollbar-thumb: rgba(151, 178, 215, 0.28);
   --ds-scrollbar-thumb-hover: rgba(171, 198, 233, 0.38);
   --ds-selection: rgba(111, 176, 232, 0.26);
-  --ds-cursor-spotlight: rgba(111, 176, 232, 0.2);
-  --ds-cursor-spotlight-edge: rgba(151, 192, 235, 0.08);
+  --ds-cursor-spotlight: rgb(var(--ds-cursor-spotlight-dark-rgb) / 0.2);
+  --ds-cursor-spotlight-edge: rgb(var(--ds-cursor-spotlight-dark-edge-rgb) / 0.08);
   --ds-shadow-card-soft: 0 16px 42px rgba(2, 6, 16, 0.22);
   --ds-shadow-card-strong: 0 22px 56px rgba(2, 6, 16, 0.3);
   --ds-shadow-chip: inset 0 1px 0 rgba(151, 192, 235, 0.06);

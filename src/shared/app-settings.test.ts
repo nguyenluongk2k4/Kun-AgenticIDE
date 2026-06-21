@@ -6,6 +6,7 @@ import {
   DEFAULT_KUN_DATA_DIR,
   DEFAULT_KUN_MODEL,
   DEFAULT_LOG_RETENTION_DAYS,
+  DEFAULT_CURSOR_SPOTLIGHT_COLOR,
   DEFAULT_APPROVAL_POLICY,
   DEFAULT_SANDBOX_MODE,
   DEFAULT_WEIXIN_BRIDGE_RPC_URL,
@@ -291,6 +292,23 @@ describe('cursor spotlight settings', () => {
       ...settings(),
       cursorSpotlight: false
     }).cursorSpotlight).toBe(false)
+  })
+
+  it('defaults, preserves, and validates the interaction effect color', () => {
+    expect(normalizeAppSettings({
+      ...settings(),
+      cursorSpotlightColor: undefined
+    }).cursorSpotlightColor).toBe(DEFAULT_CURSOR_SPOTLIGHT_COLOR)
+
+    expect(normalizeAppSettings({
+      ...settings(),
+      cursorSpotlightColor: '  #FF8800  '
+    }).cursorSpotlightColor).toBe('#ff8800')
+
+    expect(normalizeAppSettings({
+      ...settings(),
+      cursorSpotlightColor: 'not-a-color'
+    }).cursorSpotlightColor).toBe(DEFAULT_CURSOR_SPOTLIGHT_COLOR)
   })
 })
 
