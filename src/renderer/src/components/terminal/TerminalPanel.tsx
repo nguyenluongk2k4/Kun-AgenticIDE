@@ -8,7 +8,10 @@ import {
   X,
   PencilLine,
   PanelRightClose,
-  PanelsTopLeft
+  PanelsTopLeft,
+  Copy,
+  Check,
+  Minus
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import '@xterm/xterm/css/xterm.css'
@@ -166,6 +169,8 @@ export function TerminalPanel({ className = '', workspaceRoot, onCollapse, heigh
   const [renamingTabId, setRenamingTabId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [terminalBackground, setTerminalBackground] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+  const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const renameInputRef = useRef<HTMLInputElement | null>(null)
   const tabButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
   const workspaceTabStatesRef = useRef<Record<string, TerminalTabState>>({})
@@ -534,6 +539,25 @@ export function TerminalPanel({ className = '', workspaceRoot, onCollapse, heigh
     onCollapse()
   }, [cancelRenameTab, onCollapse, sessionIdForTab, tabs])
 
+  useEffect(() => {
+    return () => {
+      if (copyResetTimerRef.current) clearTimeout(copyResetTimerRef.current)
+    }
+  }, [])
+
+  const handleCopySelection = useCallback(async () => {
+    const selection = termRef.current?.getSelection()?.trimEnd() ?? ''
+    if (!selection || !navigator?.clipboard?.writeText) return
+    try {
+      await navigator.clipboard.writeText(selection)
+      setCopied(true)
+      if (copyResetTimerRef.current) clearTimeout(copyResetTimerRef.current)
+      copyResetTimerRef.current = setTimeout(() => setCopied(false), 1400)
+    } catch {
+      // Clipboard can be denied by the OS/browser shell; keep terminal usable.
+    }
+  }, [])
+
   const handleRestart = useCallback(async () => {
     if (!activeTab) return
     // Dispose the old shell then re-attach so a fresh one spawns.
@@ -641,12 +665,34 @@ export function TerminalPanel({ className = '', workspaceRoot, onCollapse, heigh
         <div className="flex shrink-0 items-center gap-1 px-3">
           <button
             type="button"
+            onClick={() => void handleCopySelection()}
+            className="rounded-full p-1.5 text-ds-faint transition hover:bg-ds-hover hover:text-ds-ink"
+            aria-label={t('terminalCopySelection')}
+            title={t('terminalCopySelection')}
+          >
+            {copied ? (
+              <Check className="h-4 w-4 text-ds-diff-added" strokeWidth={1.85} />
+            ) : (
+              <Copy className="h-4 w-4" strokeWidth={1.75} />
+            )}
+          </button>
+          <button
+            type="button"
             onClick={() => void handleRestart()}
             className="rounded-full p-1.5 text-ds-faint transition hover:bg-ds-hover hover:text-ds-ink"
             aria-label={t('terminalRestart')}
             title={t('terminalRestart')}
           >
             <RotateCw className="h-4 w-4" strokeWidth={1.75} />
+          </button>
+          <button
+            type="button"
+            onClick={onCollapse}
+            className="rounded-full p-1.5 text-ds-faint transition hover:bg-ds-hover hover:text-ds-ink"
+            aria-label={t('terminalMinimize')}
+            title={t('terminalMinimize')}
+          >
+            <Minus className="h-4 w-4" strokeWidth={1.85} />
           </button>
           <button
             type="button"

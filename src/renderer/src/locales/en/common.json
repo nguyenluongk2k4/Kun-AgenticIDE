@@ -1293,6 +1293,8 @@
   "rightPanelTerminal": "Terminal",
   "terminalPanelTitle": "Terminal",
   "terminalClear": "Clear terminal",
+  "terminalCopySelection": "Copy selected terminal text",
+  "terminalMinimize": "Minimize terminal",
   "terminalRestart": "Restart terminal",
   "terminalNewTab": "New terminal tab",
   "terminalCloseTab": "Close terminal tab",

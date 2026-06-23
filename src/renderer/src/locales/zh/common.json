@@ -1293,6 +1293,8 @@
   "rightPanelTerminal": "终端",
   "terminalPanelTitle": "终端",
   "terminalClear": "清空终端",
+  "terminalCopySelection": "复制选中的终端文本",
+  "terminalMinimize": "最小化终端",
   "terminalRestart": "重启终端",
   "terminalNewTab": "新建终端标签",
   "terminalCloseTab": "关闭终端标签",
