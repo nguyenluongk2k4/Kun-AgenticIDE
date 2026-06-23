@@ -1488,7 +1488,6 @@
   "rollbackWorkspaceBusyError": "Agent 正在运行时不能回滚工作区。",
   "rollbackWorkspaceConfirm": "确定回滚这条回答对应的 Git 提交吗？",
   "rollbackWorkspaceConfirmDetail": "此操作将在您的工作区执行 git reset --hard 和 git clean -fd。所有未提交的修改、未跟踪的文件以及该检查点之后的提交都将被永久丢失。当前对话内容会保留不变。",
-  "rollbackWorkspaceSuccessWithRescue": "工作区已回滚。已保存安全检查点：{{id}}",
   "sessionForked": "分叉会话",
   "sessionForkedFrom": "分叉自 {{title}}",
   "sessionForkedFromCompact": "来自 {{title}}",

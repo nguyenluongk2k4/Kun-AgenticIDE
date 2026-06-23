@@ -12,7 +12,7 @@ type GitCheckpointMetadata = {
   threadId: string
   repositoryRoot: string
   head: string
-  checkpointRef: string
+  checkpointRef?: string | null
   currentBranch: string | null
   createdAt: string
   untrackedFiles: string[]
@@ -38,8 +38,8 @@ function checkpointDir(dataDir: string, checkpointId: string): string {
   return join(resolve(dataDir), 'git-checkpoints', checkpointId)
 }
 
-function checkpointRef(checkpointId: string): string {
-  return `refs/kun/checkpoints/${checkpointId.replace(/[^A-Za-z0-9._-]/g, '_')}`
+function checkpointHeadBundlePath(dataDir: string, checkpointId: string): string {
+  return join(checkpointDir(dataDir, checkpointId), 'head.bundle')
 }
 
 function metadataPath(dataDir: string, checkpointId: string): string {
@@ -87,6 +87,40 @@ async function applyPatchIfPresent(repositoryRoot: string, path: string, cached:
   await runGit(repositoryRoot, ['apply', '--binary', ...(cached ? ['--index'] : []), path], 30_000)
 }
 
+async function commitExists(repositoryRoot: string, rev: string): Promise<boolean> {
+  if (!rev.trim()) return false
+  try {
+    await runGit(repositoryRoot, ['cat-file', '-e', `${rev}^{commit}`])
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function writeHeadBundle(repositoryRoot: string, path: string): Promise<void> {
+  await runGit(repositoryRoot, ['bundle', 'create', path, 'HEAD'], 30_000)
+}
+
+async function resolveCheckpointTarget(
+  repositoryRoot: string,
+  dataDir: string,
+  metadata: GitCheckpointMetadata
+): Promise<string> {
+  const head = metadata.head.trim()
+  if (await commitExists(repositoryRoot, head)) return head
+
+  const bundlePath = checkpointHeadBundlePath(dataDir, metadata.checkpointId)
+  if (await fileExists(bundlePath)) {
+    await runGit(repositoryRoot, ['bundle', 'unbundle', bundlePath], 30_000)
+    if (await commitExists(repositoryRoot, head)) return head
+  }
+
+  const legacyRef = metadata.checkpointRef?.trim() ?? ''
+  if (await commitExists(repositoryRoot, legacyRef)) return legacyRef
+
+  throw new Error(`Git checkpoint target commit is unavailable: ${head || metadata.checkpointId}`)
+}
+
 async function resolveRepositoryRoot(workspaceRoot: string): Promise<string | null> {
   const cwd = await resolveGitCwd(workspaceRoot)
   if (!cwd) return null
@@ -113,12 +147,11 @@ export async function createGitCheckpoint(params: {
 
     const checkpointId = params.checkpointId?.trim() || `gcp_${Date.now()}_${randomUUID()}`
     const dir = checkpointDir(params.dataDir, checkpointId)
-    const ref = checkpointRef(checkpointId)
     await rm(dir, { recursive: true, force: true })
     await mkdir(join(dir, 'untracked'), { recursive: true })
 
     const head = (await runGit(repositoryRoot, ['rev-parse', 'HEAD'])).stdout.trim()
-    await runGit(repositoryRoot, ['update-ref', ref, head])
+    await writeHeadBundle(repositoryRoot, checkpointHeadBundlePath(params.dataDir, checkpointId))
     const currentBranchRaw = (await runGit(repositoryRoot, ['branch', '--show-current'])).stdout.trim()
     const currentBranch = currentBranchRaw || null
     const untrackedFiles = splitNul(
@@ -140,7 +173,6 @@ export async function createGitCheckpoint(params: {
       threadId: params.threadId,
       repositoryRoot,
       head,
-      checkpointRef: ref,
       currentBranch,
       createdAt: new Date().toISOString(),
       untrackedFiles
@@ -168,7 +200,7 @@ export async function restoreGitCheckpoint(params: {
   try {
     const repositoryRoot = metadata.repositoryRoot
     await assertNoUnmerged(repositoryRoot)
-    const targetRef = metadata.checkpointRef || metadata.head
+    const targetRef = await resolveCheckpointTarget(repositoryRoot, params.dataDir, metadata)
 
     const rescue = await createGitCheckpoint({
       dataDir: params.dataDir,

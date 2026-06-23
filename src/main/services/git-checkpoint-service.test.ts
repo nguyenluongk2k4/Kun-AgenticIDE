@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createGitCheckpoint, restoreGitCheckpoint } from './git-checkpoint-service'
@@ -31,6 +31,26 @@ afterEach(async () => {
 })
 
 describe('git checkpoint service', () => {
+  it('stores checkpoint heads outside visible git refs', async () => {
+    const checkpoint = await createGitCheckpoint({
+      dataDir,
+      workspaceRoot: repoRoot,
+      threadId: 'thr_1'
+    })
+    expect(checkpoint.ok).toBe(true)
+    if (!checkpoint.ok) throw new Error(checkpoint.message)
+
+    const checkpointDir = join(dataDir, 'git-checkpoints', checkpoint.checkpointId)
+    const metadata = JSON.parse(await readFile(join(checkpointDir, 'metadata.json'), 'utf-8')) as {
+      checkpointRef?: string
+    }
+    expect(metadata.checkpointRef).toBeUndefined()
+    await expect(stat(join(checkpointDir, 'head.bundle'))).resolves.toBeTruthy()
+
+    const refs = execFileSync('git', ['-C', repoRoot, 'show-ref'], { encoding: 'utf-8' })
+    expect(refs).not.toContain('refs/kun/checkpoints')
+  })
+
   it('restores staged, unstaged, and untracked files to the checkpoint state', async () => {
     await writeFile(join(repoRoot, 'tracked.txt'), 'checkpoint unstaged\n')
     await writeFile(join(repoRoot, 'staged.txt'), 'checkpoint staged\n')
@@ -94,5 +114,43 @@ describe('git checkpoint service', () => {
       checkpoint.head
     )
     expect(execFileSync('git', ['-C', repoRoot, 'status', '--porcelain=v1'], { encoding: 'utf-8' }).trim()).toBe('')
+  })
+
+  it('restores from the head bundle when the checkpoint commit was pruned', async () => {
+    const checkpoint = await createGitCheckpoint({
+      dataDir,
+      workspaceRoot: repoRoot,
+      threadId: 'thr_1'
+    })
+    expect(checkpoint.ok).toBe(true)
+    if (!checkpoint.ok) throw new Error(checkpoint.message)
+
+    execFileSync('git', ['-C', repoRoot, 'checkout', '--orphan', 'replacement'], { stdio: 'pipe' })
+    execFileSync('git', ['-C', repoRoot, 'rm', '-rf', '.'], { stdio: 'pipe' })
+    await writeFile(join(repoRoot, 'tracked.txt'), 'replacement\n')
+    execFileSync('git', ['-C', repoRoot, 'add', 'tracked.txt'], { stdio: 'pipe' })
+    execFileSync('git', ['-C', repoRoot, 'commit', '-m', 'replacement'], { stdio: 'pipe' })
+    execFileSync('git', ['-C', repoRoot, 'branch', '-D', 'main'], { stdio: 'pipe' })
+    execFileSync('git', ['-C', repoRoot, 'branch', '-m', 'main'], { stdio: 'pipe' })
+    execFileSync('git', ['-C', repoRoot, 'reflog', 'expire', '--expire=now', '--all'], { stdio: 'pipe' })
+    execFileSync('git', ['-C', repoRoot, 'gc', '--prune=now'], { stdio: 'pipe' })
+
+    expect(() => execFileSync('git', ['-C', repoRoot, 'cat-file', '-e', `${checkpoint.head}^{commit}`], {
+      stdio: 'pipe'
+    })).toThrow()
+
+    const restored = await restoreGitCheckpoint({
+      dataDir,
+      checkpointId: checkpoint.checkpointId
+    })
+    expect(restored.ok).toBe(true)
+    if (!restored.ok) throw new Error(restored.message)
+
+    expect(await readFile(join(repoRoot, 'tracked.txt'), 'utf-8')).toBe('base\n')
+    expect(execFileSync('git', ['-C', repoRoot, 'rev-parse', 'HEAD'], { encoding: 'utf-8' }).trim()).toBe(
+      checkpoint.head
+    )
+    const refs = execFileSync('git', ['-C', repoRoot, 'show-ref'], { encoding: 'utf-8' })
+    expect(refs).not.toContain('refs/kun/checkpoints')
   })
 })

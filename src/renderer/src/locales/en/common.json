@@ -1488,7 +1488,6 @@
   "rollbackWorkspaceBusyError": "Cannot roll back the workspace while the agent is running.",
   "rollbackWorkspaceConfirm": "Roll back the Git commit for this response?",
   "rollbackWorkspaceConfirmDetail": "This will run git reset --hard and git clean -fd in your workspace. Any uncommitted edits, untracked files, and commits added since this checkpoint will be permanently lost. The chat conversation will be kept as-is.",
-  "rollbackWorkspaceSuccessWithRescue": "Workspace rolled back. A safety checkpoint was saved: {{id}}",
   "sessionForked": "Forked thread",
   "sessionForkedFrom": "Forked from {{title}}",
   "sessionForkedFromCompact": "from {{title}}",

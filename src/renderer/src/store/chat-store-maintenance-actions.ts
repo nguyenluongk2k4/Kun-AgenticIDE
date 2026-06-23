@@ -789,11 +789,7 @@ export function createMaintenanceActions(
       'thread:',
       activeThreadId
     )
-    if (rescueId) {
-      set({ error: i18n.t('common:rollbackWorkspaceSuccessWithRescue', { id: rescueId }) })
-    } else {
-      set({ error: null })
-    }
+    set({ error: null })
   },
 
   resolveApproval: async (blockId, decision) => {
