@@ -138,6 +138,7 @@ export function defaultKunRuntimeSettings(
     tokenEconomyMode: false,
     tokenEconomy: defaultKunTokenEconomySettings(),
     insecure: false,
+    autoModelRouter: true,
     mcpSearch: defaultKunMcpSearchSettings(),
     storage: defaultKunStorageSettings(),
     contextCompaction: defaultKunContextCompactionSettings(),
@@ -446,6 +447,7 @@ export function mergeKunRuntimeSettings(
     port: nextPort,
     tokenEconomyMode: nextTokenEconomy.enabled,
     tokenEconomy: nextTokenEconomy,
+    autoModelRouter: patch?.autoModelRouter ?? current.autoModelRouter ?? true,
     mcpSearch: nextMcpSearch,
     storage: nextStorage,
     contextCompaction: nextContextCompaction,
@@ -1051,6 +1053,7 @@ export function migrateLegacyAppSettings(parsed: LegacyAppSettingsShape): Partia
       explicitKun.tokenEconomyMode ?? kunDefaults.tokenEconomyMode
     ),
     mcpSearch: normalizeKunMcpSearchSettings(explicitKun.mcpSearch),
+    autoModelRouter: explicitKun.autoModelRouter !== false,
     storage: normalizeKunStorageSettings(explicitKun.storage),
     contextCompaction: normalizeKunContextCompactionSettings(explicitKun.contextCompaction),
     runtimeTuning: normalizeKunRuntimeTuningSettings(explicitKun.runtimeTuning),
@@ -1077,3 +1080,4 @@ export function migrateLegacyAppSettings(parsed: LegacyAppSettingsShape): Partia
     }
   }
 }
+

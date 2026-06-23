@@ -45,6 +45,8 @@ import type { TrayActionPayload } from '../shared/kun-gui-api'
 import { isAllowedDevPreviewUrl } from '../shared/dev-preview-url'
 import { isAuthorizedPrototypeFileUrl } from './services/prototype-embed-registry'
 import { fetchUpstreamModelIds } from './upstream-models'
+import { probeModelProvider } from './provider-connection'
+import { modelProviderPresetProfile } from '../shared/model-provider-presets'
 import {
   kunRuntimeAdapter,
   getRuntimeBaseUrlForSettings,
@@ -962,6 +964,7 @@ async function resolveManagedKunLaunchSettings(
   source: string
 ): Promise<AppSettingsV1> {
   const runtime = getKunRuntimeSettings(settings)
+  if (runtime.binaryPath.trim()) return settings
   const resolved = await kunRuntimeAdapter.resolveAvailablePort(runtime.port)
   if (!resolved.changed) return settings
 
@@ -1525,8 +1528,36 @@ app.whenReady().then(async () => {
     return saved
   }
 
+  const maybeAddNineRouterProvider = async (settings: AppSettingsV1): Promise<AppSettingsV1> => {
+    if (settings.provider.providers.some((provider) => provider.id === '9router')) return settings
+    const preset = modelProviderPresetProfile({
+      id: '9router',
+      name: '9Router',
+      baseUrl: 'http://localhost:20128/v1',
+      endpointFormat: 'chat_completions',
+      models: [],
+      docsUrl: 'https://www.npmjs.com/package/9router',
+      apiKeyUrl: 'https://www.npmjs.com/package/9router'
+    })
+    if (!preset) return settings
+    const probe = await probeModelProvider({
+      baseUrl: preset.baseUrl,
+      apiKey: preset.apiKey,
+      endpointFormat: preset.endpointFormat
+    }, settings)
+    if (!probe.ok || probe.modelIds.length === 0) return settings
+    const provider = { ...preset, models: probe.modelIds }
+    return store.patch({
+      provider: {
+        ...settings.provider,
+        providers: [...settings.provider.providers, provider]
+      },
+      agents: { kun: { providerId: provider.id, model: provider.models[0] } }
+    })
+  }
+
   const fetchModels = async () => {
-    const settings = await store.load()
+    const settings = await maybeAddNineRouterProvider(await store.load())
     const key = resolveConfiguredApiKey(settings)
     return fetchUpstreamModelIds(settings, key)
   }

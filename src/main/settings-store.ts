@@ -9,6 +9,7 @@ import {
   DEFAULT_CURSOR_SPOTLIGHT_COLOR,
   DEFAULT_LOG_RETENTION_DAYS,
   DEFAULT_WRITE_WORKSPACE_ROOT,
+  DEFAULT_KUN_PORT,
   defaultClawSettings,
   defaultKunRuntimeSettings,
   defaultModelProviderSettings,
@@ -43,6 +44,14 @@ export type { AppSettingsV1 }
 const DEFAULT_WORKSPACE_ROOT = join(homedir(), '.kun', 'default_workspace')
 const DEFAULT_CLAW_CHANNELS_ROOT = join(homedir(), '.kun', 'claw')
 const DEFAULT_WRITE_WORKSPACE_ROOT_ABSOLUTE = expandHomePath(DEFAULT_WRITE_WORKSPACE_ROOT)
+const activeProfileName = (): string => (process.env.KUN_PROFILE ?? '').trim().replace(/[^a-zA-Z0-9_-]/g, '-')
+const profileHomeRoot = (profile = activeProfileName()): string =>
+  profile ? join(homedir(), `.kun-${profile}`) : join(homedir(), '.kun')
+const profilePath = (name: string, profile = activeProfileName()): string =>
+  profile ? join(profileHomeRoot(profile), name) : join(homedir(), '.kun', name)
+const profileTildePath = (name: string, profile = activeProfileName()): string =>
+  profile ? `~/.kun-${profile}/${name}` : `~/.kun/${name}`
+const profilePortOffset = (profile = activeProfileName()): number => (profile ? 110 : 0)
 const SETTINGS_FILE_NAME = 'kun-settings.json'
 // 旧版设置文件名。userData 整目录迁移后旧文件会原样留在新目录里,
 // 首次加载从它兜底读取,load() 随后把规范化结果另存为新文件名;旧
@@ -197,43 +206,69 @@ async function ensureClawChannelWorkspaceRootsExist(settings: AppSettingsV1): Pr
   }
 }
 
-const defaultSettings = (): AppSettingsV1 => ({
-  version: 1,
-  locale: 'en',
-  theme: 'system',
-  uiFontScale: 'small',
-  cursorSpotlight: true,
-  cursorSpotlightColor: DEFAULT_CURSOR_SPOTLIGHT_COLOR,
-  provider: defaultModelProviderSettings(),
-  agents: {
-    kun: defaultKunRuntimeSettings()
-  },
-  workspaceRoot: DEFAULT_WORKSPACE_ROOT,
-  log: {
-    enabled: true,
-    retentionDays: DEFAULT_LOG_RETENTION_DAYS
-  },
-  notifications: {
-    turnComplete: true
-  },
-  appBehavior: normalizeAppBehaviorSettings(),
-  keyboardShortcuts: normalizeKeyboardShortcuts(),
-  guiUpdate: {
-    channel: DEFAULT_GUI_UPDATE_CHANNEL
-  },
-  codePromptPrefix: '',
-  disabledSkillIds: [],
-  write: defaultWriteSettings(),
-  claw: defaultClawSettings(),
-  schedule: defaultScheduleSettings(),
-  workflow: defaultWorkflowSettings(),
-  terminal: defaultTerminalSettings()
-})
+const defaultSettings = (): AppSettingsV1 => {
+  const profile = activeProfileName()
+  const portOffset = profilePortOffset(profile)
+  const kunDefaults = defaultKunRuntimeSettings(DEFAULT_KUN_PORT + portOffset)
+  if (profile) {
+    kunDefaults.dataDir = profileTildePath('data', profile)
+  }
+  const scheduleDefaults = defaultScheduleSettings()
+  if (profile) {
+    scheduleDefaults.defaultWorkspaceRoot = profilePath('schedule_workspace', profile)
+    scheduleDefaults.internal.port += portOffset
+  }
+  const workflowDefaults = defaultWorkflowSettings()
+  if (profile) {
+    workflowDefaults.defaultWorkspaceRoot = profilePath('workflow_workspace', profile)
+    workflowDefaults.webhookPort += portOffset
+  }
+  const writeDefaults = defaultWriteSettings()
+  if (profile) {
+    const writeRoot = profilePath('write_workspace', profile)
+    writeDefaults.defaultWorkspaceRoot = writeRoot
+    writeDefaults.activeWorkspaceRoot = writeRoot
+    writeDefaults.workspaces = [writeRoot]
+  }
+
+  return {
+    version: 1,
+    locale: 'en',
+    theme: 'system',
+    uiFontScale: 'small',
+    cursorSpotlight: true,
+    cursorSpotlightColor: DEFAULT_CURSOR_SPOTLIGHT_COLOR,
+    provider: defaultModelProviderSettings(),
+    agents: {
+      kun: kunDefaults
+    },
+    workspaceRoot: profile ? profilePath('default_workspace', profile) : DEFAULT_WORKSPACE_ROOT,
+    log: {
+      enabled: true,
+      retentionDays: DEFAULT_LOG_RETENTION_DAYS
+    },
+    notifications: {
+      turnComplete: true
+    },
+    appBehavior: normalizeAppBehaviorSettings(),
+    keyboardShortcuts: normalizeKeyboardShortcuts(),
+    guiUpdate: {
+      channel: DEFAULT_GUI_UPDATE_CHANNEL
+    },
+    codePromptPrefix: '',
+    disabledSkillIds: [],
+    write: writeDefaults,
+    claw: defaultClawSettings(),
+    schedule: scheduleDefaults,
+    workflow: workflowDefaults,
+    terminal: defaultTerminalSettings()
+  }
+}
 
 function buildMergedSettings(parsed: Partial<AppSettingsV1>): AppSettingsV1 {
   const migrated = migrateLegacyAppSettings(parsed)
   const defaults = defaultSettings()
-  return {
+  const merged: AppSettingsV1 = {
     ...defaults,
     ...migrated,
     provider: mergeModelProviderSettings(defaults.provider, migrated.provider),
@@ -253,6 +288,22 @@ function buildMergedSettings(parsed: Partial<AppSettingsV1>): AppSettingsV1 {
     codePromptPrefix: typeof migrated.codePromptPrefix === 'string' ? migrated.codePromptPrefix : '',
     disabledSkillIds: normalizeDisabledSkillIds(migrated.disabledSkillIds)
   }
+  const profile = activeProfileName()
+  if (profile) {
+    const portOffset = profilePortOffset(profile)
+    merged.workspaceRoot = profilePath('default_workspace', profile)
+    merged.agents.kun.port = DEFAULT_KUN_PORT + portOffset
+    merged.agents.kun.dataDir = profileTildePath('data', profile)
+    merged.schedule.defaultWorkspaceRoot = profilePath('schedule_workspace', profile)
+    merged.schedule.internal.port = defaultScheduleSettings().internal.port + portOffset
+    merged.workflow.defaultWorkspaceRoot = profilePath('workflow_workspace', profile)
+    merged.workflow.webhookPort = defaultWorkflowSettings().webhookPort + portOffset
+    const writeRoot = profilePath('write_workspace', profile)
+    merged.write.defaultWorkspaceRoot = writeRoot
+    merged.write.activeWorkspaceRoot = writeRoot
+    merged.write.workspaces = [writeRoot]
+  }
+  return merged
 }
 
 function normalizeDisabledSkillIds(value: unknown): string[] {

@@ -17,6 +17,7 @@ import type {
 
 export type ModelProviderPresetId =
   | 'litellm'
+  | '9router'
   | 'longcat'
   | 'zhipu-coding-plan'
   | 'zai-coding-plan'
@@ -206,6 +207,15 @@ export const MODEL_PROVIDER_PRESETS: ModelProviderPreset[] = [
     models: [],
     docsUrl: 'https://docs.litellm.ai/docs/',
     apiKeyUrl: 'https://docs.litellm.ai/docs/proxy/quick_start'
+  },
+  {
+    id: '9router',
+    name: '9Router',
+    baseUrl: 'http://localhost:20128/v1',
+    endpointFormat: 'chat_completions',
+    models: [],
+    docsUrl: 'https://www.npmjs.com/package/9router',
+    apiKeyUrl: 'https://www.npmjs.com/package/9router'
   },
   {
     id: 'longcat',

@@ -211,6 +211,8 @@ export type KunRuntimeSettingsV1 = {
   tokenEconomy: KunTokenEconomySettingsV1
   /** When true, the runtime skips bearer-token auth. Local dev only. */
   insecure: boolean
+  /** Enable the flash-based auto model router when the selected model is `auto`. */
+  autoModelRouter: boolean
   /** GUI-managed MCP progressive discovery/search settings written into Kun config.json. */
   mcpSearch: KunMcpSearchSettingsV1
   /** Persistent store backend used by Kun. */

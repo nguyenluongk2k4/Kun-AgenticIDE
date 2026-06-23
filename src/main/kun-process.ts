@@ -387,6 +387,7 @@ export async function syncGuiManagedKunConfig(
   runtime: Pick<
     KunRuntimeSettingsV1,
     | 'mcpSearch'
+    | 'autoModelRouter'
     | 'tokenEconomy'
     | 'storage'
     | 'contextCompaction'
@@ -456,7 +457,10 @@ export async function syncGuiManagedKunConfig(
     },
     models: modelConfigForRuntime(existingModels, runtime.modelProfiles),
     contextCompaction: contextCompactionConfigForRuntime(runtime.contextCompaction, existingContextCompaction),
-    runtime: runtimeTuningConfigForRuntime(runtime.runtimeTuning, existingRuntimeTuning),
+    runtime: {
+      ...runtimeTuningConfigForRuntime(runtime.runtimeTuning, existingRuntimeTuning),
+      autoModelRouter: runtime.autoModelRouter !== false
+    },
     quality: qualityConfigForRuntime(runtime.quality, existingQuality),
     capabilities: {
       ...capabilities,
@@ -1474,3 +1478,4 @@ async function probeKunHealth(port: number): Promise<boolean> {
     return false
   }
 }
+

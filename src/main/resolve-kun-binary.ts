@@ -12,6 +12,12 @@ import { join } from 'node:path'
  * 2. Bundled `kun/dist/cli/serve-entry.js` (built by the root
  *    `build:kun` script before dev, build, install, and packaging).
  *
+ * `9router` is intentionally not auto-detected from PATH here. To develop Kun
+ * while a separate 9router install is present, keep Kun on the bundled runtime.
+ * To use 9router, configure it explicitly as `binaryPath` and keep the runtime
+ * port fixed; if that port is already healthy the GUI uses it directly,
+ * otherwise `autoStart` decides whether the GUI launches the configured binary.
+ *
  * The resolver never throws on missing artifacts during the user
  * typing flow: it returns the bundled dist path even when the file
  * does not exist yet, and the calling layer is responsible for

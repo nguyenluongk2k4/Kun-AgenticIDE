@@ -360,6 +360,16 @@ export function GeneralSettingsSection({ ctx }: { ctx: Record<string, any> }): R
                     </div>
                   }
                 />
+                <SettingRow
+                  title={t('nineRouter')}
+                  description={t('nineRouterDesc')}
+                  control={
+                    <Toggle
+                      checked={kun.autoModelRouter !== false}
+                      onChange={(v) => updateKun({ autoModelRouter: v })}
+                    />
+                  }
+                />
               </SettingsCard>
 
               <SettingsCard title={t('desktopBehavior')} className="mt-6">

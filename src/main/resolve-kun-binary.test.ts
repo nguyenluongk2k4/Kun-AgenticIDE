@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   buildKunServeArgs,
   resolveKunExecutable,
@@ -9,6 +9,7 @@ import {
 } from './resolve-kun-binary'
 
 const tempRoots: string[] = []
+let originalPath = ''
 
 function tempRoot(): string {
   const root = mkdtempSync(join(tmpdir(), 'kun-resolver-'))
@@ -21,11 +22,17 @@ function touch(path: string): void {
   writeFileSync(path, '', 'utf8')
 }
 
+beforeEach(() => {
+  originalPath = process.env.PATH ?? ''
+  process.env.PATH = ''
+})
+
 afterEach(() => {
   while (tempRoots.length > 0) {
     const root = tempRoots.pop()
     if (root) rmSync(root, { recursive: true, force: true })
   }
+  process.env.PATH = originalPath
 })
 
 describe('resolveKunExecutable', () => {
@@ -54,6 +61,25 @@ describe('resolveKunExecutable', () => {
       kind: 'node-script',
       command: process.execPath,
       args: [join(root, 'kun/dist/cli/serve-entry.js')],
+      dataDir: ''
+    })
+  })
+
+  it('keeps bundled Kun isolated from a global 9router on PATH', () => {
+    const root = tempRoot()
+    const entry = join(root, 'kun/dist/cli/serve-entry.js')
+    touch(entry)
+    const binDir = tempRoot()
+    const executableName = process.platform === 'win32' ? '9router.cmd' : '9router'
+    touch(join(binDir, executableName))
+    process.env.PATH = [binDir, originalPath].filter(Boolean).join(process.platform === 'win32' ? ';' : ':')
+
+    const resolution = resolveKunExecutable(root, '')
+
+    expect(resolution).toEqual({
+      kind: 'node-script',
+      command: process.execPath,
+      args: [entry],
       dataDir: ''
     })
   })

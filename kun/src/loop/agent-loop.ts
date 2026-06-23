@@ -584,6 +584,7 @@ export type AgentLoopOptions = {
   toolArgumentRepair?: {
     maxStringBytes?: number
   }
+  autoModelRouter?: boolean
   /**
    * Tuning + test seams for goal auto-resume (KunAgent/Kun#370). Defaults
    * back off exponentially and bound consecutive no-progress retries; tests
@@ -2672,6 +2673,12 @@ export class AgentLoop {
         ...(requestedReasoningEffort ? { reasoningEffort: requestedReasoningEffort } : {})
       }
     }
+    if (this.opts.autoModelRouter === false) {
+      return {
+        model: 'deepseek-v4-flash',
+        ...(requestedReasoningEffort ? { reasoningEffort: requestedReasoningEffort } : {})
+      }
+    }
     const key = autoModelRouteKey(input.threadId, input.turnId)
     const cached = this.autoModelRoutes.get(key)
     if (cached) {
@@ -2988,3 +2995,4 @@ function prefixVolatilityStageDetails(
     noRegexDetector: true
   }
 }
+

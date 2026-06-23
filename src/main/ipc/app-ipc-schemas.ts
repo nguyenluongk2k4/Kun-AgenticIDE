@@ -350,6 +350,7 @@ const kunRuntimePatchSchema = z.object({
     }).strict().optional()
   }).strict().optional(),
   insecure: z.boolean().optional(),
+  autoModelRouter: z.boolean().optional(),
   mcpSearch: z.object({
     enabled: z.boolean().optional(),
     mode: mcpSearchModeSchema.optional(),

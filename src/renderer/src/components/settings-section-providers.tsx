@@ -293,6 +293,28 @@ function providerConnectionFingerprint(provider: ModelProviderProfileV1): string
   return [provider.baseUrl, provider.apiKey, provider.endpointFormat].join('\0')
 }
 
+function isNineRouterProviderUrl(baseUrl: string): boolean {
+  try {
+    const parsed = new URL(baseUrl.trim())
+    const hostname = parsed.hostname.toLowerCase()
+    return parsed.port === '20128' && ['localhost', '127.0.0.1', '::1'].includes(hostname)
+  } catch {
+    return false
+  }
+}
+
+function nineRouterProfileFrom(target: ModelProviderProfileV1, modelIds: readonly string[]): ModelProviderProfileV1 {
+  return {
+    ...target,
+    id: '9router',
+    name: '9Router',
+    baseUrl: target.baseUrl.trim() || 'http://localhost:20128/v1',
+    endpointFormat: 'chat_completions',
+    models: mergeProviderModelIds(target.models, modelIds),
+    modelProfiles: { ...target.modelProfiles }
+  }
+}
+
 type ProbeState = {
   fingerprint: string
   mode: 'test' | 'fetch'
@@ -870,6 +892,34 @@ export function ProvidersSettingsSection({ ctx }: { ctx: Record<string, any> }):
       setProbeStates((prev) => ({
         ...prev,
         [target.id]: { fingerprint, mode, status: 'error', message: result.message }
+      }))
+      return
+    }
+    if (mode === 'fetch' && isNineRouterProviderUrl(target.baseUrl)) {
+      const nextProvider = nineRouterProfileFrom(target, result.modelIds)
+      const existingNineRouter = modelProviders.find((item) => item.id === nextProvider.id)
+      const nextProviders = existingNineRouter
+        ? modelProviders.map((item) => item.id === nextProvider.id
+          ? {
+              ...nextProvider,
+              apiKey: item.apiKey.trim() ? item.apiKey : nextProvider.apiKey,
+              models: mergeProviderModelIds(item.models, nextProvider.models),
+              modelProfiles: { ...nextProvider.modelProfiles, ...item.modelProfiles }
+            }
+          : item)
+        : modelProviders.filter((item) => item.id !== target.id).concat(nextProvider)
+      setDraftProvider(null)
+      setSelectedProviderId(nextProvider.id)
+      updateModelProviders(nextProviders, { providerId: nextProvider.id, model: nextProvider.models[0] ?? kun.model })
+      setProbeStates((prev) => ({
+        ...prev,
+        [nextProvider.id]: {
+          fingerprint: providerConnectionFingerprint(nextProvider),
+          mode,
+          status: 'ok',
+          latencyMs: result.latencyMs,
+          total: result.modelIds.length
+        }
       }))
       return
     }

@@ -129,6 +129,7 @@ export const RuntimeTuningConfigSchema = z
     // `stream_idle_timeout`. Local LLM servers prefilling a huge prompt can
     // stay silent well past the 45s default; `0` disables the guard entirely.
     streamIdleTimeoutMs: z.number().int().min(0).optional(),
+    autoModelRouter: z.boolean().default(true),
     toolStorm: z
       .object({
         enabled: z.boolean().optional(),

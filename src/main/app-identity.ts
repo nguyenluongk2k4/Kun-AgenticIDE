@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import { join } from 'node:path'
 
 /**
  * 项目对外展示的产品名,需要和:
@@ -28,4 +29,10 @@ export const APP_PRODUCT_NAME = 'Kun'
  */
 export function configureAppIdentity(): void {
   app.setName(APP_PRODUCT_NAME)
+
+  const profile = process.env.KUN_PROFILE?.trim()
+  if (profile) {
+    const safeProfile = profile.replace(/[^a-zA-Z0-9_-]/g, '-')
+    app.setPath('userData', join(app.getPath('appData'), `${APP_PRODUCT_NAME}-${safeProfile}`))
+  }
 }

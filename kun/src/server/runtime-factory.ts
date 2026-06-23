@@ -447,6 +447,7 @@ export async function createKunServeRuntime(
     contextCompaction: options.contextCompaction,
     ...(options.runtime?.toolStorm ? { toolStorm: options.runtime.toolStorm } : {}),
     ...(options.runtime?.toolArgumentRepair ? { toolArgumentRepair: options.runtime.toolArgumentRepair } : {}),
+    autoModelRouter: options.runtime?.autoModelRouter !== false,
     ...(resolvedHooks.length ? { hooks: resolvedHooks } : {}),
     ...(attachmentStore ? { attachmentStore } : {}),
     ...(memoryStore ? { memoryStore } : {}),
