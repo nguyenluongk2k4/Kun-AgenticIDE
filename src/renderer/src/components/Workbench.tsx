@@ -152,6 +152,7 @@ type PendingSddPlanTarget = {
 
 const COMPOSER_FILE_CONTEXT_MAX_CHARS_PER_FILE = 60_000
 const COMPOSER_FILE_CONTEXT_MAX_TOTAL_CHARS = 180_000
+const NINE_ROUTER_DASHBOARD_URL = 'http://127.0.0.1:20128'
 // Upper bound on how many files a single `@directory` mention expands into, so a
 // large folder cannot flood the prompt (the char budget above is the hard cap).
 const COMPOSER_DIRECTORY_CONTEXT_MAX_FILES = 60
@@ -472,6 +473,7 @@ export function Workbench(): ReactElement {
   const [connectPhoneSidebarOpen, setConnectPhoneSidebarOpen] = useState(false)
   const [fileTreeSidePanelOpen, setFileTreeSidePanelOpen] = useState(false)
   const [openFilePreviewTargets, setOpenFilePreviewTargets] = useState<WorkspaceFileTarget[]>([])
+  const [browserPreferredUrlOverride, setBrowserPreferredUrlOverride] = useState<string | null>(null)
   const initUiPlugins = useUiPluginStore((s) => s.initUiPlugins)
   const uiModeCameosEnabled = useUiModeCameosEnabled()
   const [focusModeEnabled, setFocusModeEnabled] = useState(readFocusModePreference)
@@ -569,6 +571,7 @@ export function Workbench(): ReactElement {
     [activeSkillWorkspace, timelineBlocks]
   )
   const latestDevPreviewUrl = detectedDevPreviewUrls[0] ?? null
+  const browserPreferredUrl = browserPreferredUrlOverride ?? latestDevPreviewUrl
   const latestAutoOpenDevPreviewUrl = autoOpenDevPreviewUrls[0] ?? null
   const currentSideConversations = useMemo(
     () =>
@@ -2169,8 +2172,19 @@ export function Workbench(): ReactElement {
       return
     }
     if (rightPanelMode === 'file') setOpenFilePreviewTargets([])
+    if (rightPanelMode === 'browser') setBrowserPreferredUrlOverride(null)
     setRightPanelMode(null)
     setFilePreviewTarget(null)
+  }
+
+  const handleToggleRightPanelMode = (mode: Exclude<RightPanelMode, null>): void => {
+    if (mode === 'browser') setBrowserPreferredUrlOverride(null)
+    toggleRightPanelMode(mode)
+  }
+
+  const openNineRouterDashboard = (): void => {
+    setBrowserPreferredUrlOverride(NINE_ROUTER_DASHBOARD_URL)
+    setRightPanelMode('browser')
   }
 
   const startNewWriteAssistantConversation = (): void => {
@@ -2352,7 +2366,7 @@ export function Workbench(): ReactElement {
             ) : rightPanelMode === 'browser' ? (
               <DevBrowserPanel
                 blocks={devPreviewBlocks}
-                preferredUrl={latestDevPreviewUrl}
+                preferredUrl={browserPreferredUrl}
                 className="h-full max-h-full w-full flex-col"
                 onCollapse={closeRightPanel}
               />
@@ -2578,7 +2592,7 @@ export function Workbench(): ReactElement {
                   ) : null}
                   <WorkbenchTopBar
                     rightPanelMode={rightPanelMode}
-                    onToggleRightPanelMode={toggleRightPanelMode}
+                    onToggleRightPanelMode={handleToggleRightPanelMode}
                     planPanelEnabled={Boolean(activeGuiPlan)}
                     terminalOpen={terminalOpen}
                     onToggleTerminal={toggleTerminal}
@@ -2590,6 +2604,7 @@ export function Workbench(): ReactElement {
                     fileTreeEnabled={Boolean(fileTreeWorkspaceRoot)}
                     onToggleFileTree={toggleFileTreeSidePanel}
                     onOpenSideChat={openSideChat}
+                    onOpenNineRouterDashboard={openNineRouterDashboard}
                   />
                 </div>
               </div>

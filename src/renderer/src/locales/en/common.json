@@ -1286,6 +1286,7 @@
   "inspector": "Changes",
   "rightPanelChanges": "Changes",
   "rightPanelBrowser": "Preview",
+  "rightPanelNineRouter": "9Router dashboard",
   "rightPanelRuntime": "Runtime",
   "rightPanelPlan": "Plan",
   "rightPanelFiles": "Files",

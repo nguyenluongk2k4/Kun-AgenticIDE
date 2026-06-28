@@ -17,6 +17,7 @@ import {
   ListTodo,
   Loader2,
   MessageCircleMore,
+  Router,
   RefreshCw,
   Terminal
 } from 'lucide-react'
@@ -46,6 +47,7 @@ type Props = {
   fileTreeEnabled?: boolean
   onToggleFileTree?: () => void
   onOpenSideChat?: () => void
+  onOpenNineRouterDashboard?: () => void
 }
 
 const TOPBAR_ICON_CLASS = 'h-[17px] w-[17px]'
@@ -72,7 +74,8 @@ export function WorkbenchTopBar({
   fileTreeOpen = false,
   fileTreeEnabled = true,
   onToggleFileTree,
-  onOpenSideChat
+  onOpenSideChat,
+  onOpenNineRouterDashboard
 }: Props): ReactElement {
   const { t } = useTranslation(['common', 'settings'])
   const [editors, setEditors] = useState<EditorInfo[]>([])
@@ -394,6 +397,18 @@ export function WorkbenchTopBar({
           </Fragment>
         )
       })}
+
+      {onOpenNineRouterDashboard ? (
+        <button
+          type="button"
+          onClick={onOpenNineRouterDashboard}
+          className={topbarIconButtonClass(false)}
+          aria-label={t('rightPanelNineRouter')}
+          title={t('rightPanelNineRouter')}
+        >
+          <Router className={TOPBAR_ICON_CLASS} strokeWidth={1.75} />
+        </button>
+      ) : null}
 
       {onToggleFileTree ? (
         <button

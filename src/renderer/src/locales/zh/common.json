@@ -1286,6 +1286,7 @@
   "inspector": "变更",
   "rightPanelChanges": "变更",
   "rightPanelBrowser": "预览",
+  "rightPanelNineRouter": "9Router 仪表盘",
   "rightPanelRuntime": "运行时",
   "rightPanelPlan": "计划",
   "rightPanelFiles": "文件",

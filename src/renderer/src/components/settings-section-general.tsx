@@ -365,8 +365,8 @@ export function GeneralSettingsSection({ ctx }: { ctx: Record<string, any> }): R
                   description={t('nineRouterDesc')}
                   control={
                     <Toggle
-                      checked={kun.autoModelRouter !== false}
-                      onChange={(v) => updateKun({ autoModelRouter: v })}
+                      checked={kun.nineRouterEnabled === true}
+                      onChange={(v) => updateKun({ nineRouterEnabled: v })}
                     />
                   }
                 />

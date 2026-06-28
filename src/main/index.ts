@@ -87,6 +87,11 @@ import {
 import { webhookUrl } from './claw-runtime-helpers'
 import { createTelegramRuntime, type TelegramRuntime, verifyTelegramBotToken } from './telegram-runtime'
 import { isKunHealthResponseBody } from './kun-health'
+import {
+  ensureNineRouterRunning,
+  NINE_ROUTER_BASE_URL,
+  stopNineRouterAndWait
+} from './nine-router-service'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 // 品牌升级为 Kun 后仍保留旧 AppUserModelId:它必须和 electron-builder
@@ -160,6 +165,105 @@ function resolveConfiguredApiKey(settings: AppSettingsV1): string {
   const fromSettings = getActiveAgentApiKey(settings)
   const fromEnv = process.env.DEEPSEEK_API_KEY?.trim() ?? ''
   return fromSettings || fromEnv
+}
+
+function runtimeUsesLocalNineRouter(settings: AppSettingsV1): boolean {
+  const runtime = resolveKunRuntimeSettings(settings)
+  if (runtime.providerId.trim() === '9router') return true
+  try {
+    const parsed = new URL(runtime.baseUrl.trim())
+    const hostname = parsed.hostname.toLowerCase()
+    return parsed.port === '20128' && ['localhost', '127.0.0.1', '::1'].includes(hostname)
+  } catch {
+    return false
+  }
+}
+
+function canStartRuntimeWithoutApiKey(settings: AppSettingsV1): boolean {
+  return runtimeUsesLocalNineRouter(settings)
+}
+
+function nineRouterPresetProfile() {
+  return modelProviderPresetProfile({
+    id: '9router',
+    name: '9Router',
+    baseUrl: NINE_ROUTER_BASE_URL,
+    endpointFormat: 'chat_completions',
+    models: [],
+    docsUrl: 'https://www.npmjs.com/package/9router',
+    apiKeyUrl: 'https://www.npmjs.com/package/9router'
+  })
+}
+
+function shouldAutoEnableNineRouter(settings: AppSettingsV1): boolean {
+  const runtime = getKunRuntimeSettings(settings)
+  if (runtime.nineRouterEnabled === true) return false
+  if (runtime.providerId.trim() === '9router') return true
+  return settings.provider.providers.some((provider) => provider.id === '9router')
+}
+
+async function ensureNineRouterProviderRegistered(settings: AppSettingsV1): Promise<AppSettingsV1> {
+  const preset = nineRouterPresetProfile()
+  if (!preset || !store) return settings
+  const existingProvider = settings.provider.providers.find((item) => item.id === '9router') ?? null
+  const probe = await probeModelProvider({
+    baseUrl: existingProvider?.baseUrl?.trim() || preset.baseUrl,
+    apiKey: existingProvider?.apiKey ?? preset.apiKey,
+    endpointFormat: existingProvider?.endpointFormat ?? preset.endpointFormat
+  }, settings)
+  if (!probe.ok || probe.modelIds.length === 0) return settings
+  const syncedModels = existingProvider ? [...existingProvider.models] : probe.modelIds
+  const provider = existingProvider
+    ? {
+        ...existingProvider,
+        ...preset,
+        apiKey: existingProvider.apiKey,
+        baseUrl: existingProvider.baseUrl.trim() || preset.baseUrl,
+        endpointFormat: existingProvider.endpointFormat,
+        // Preserve manual edits to the provider's model list instead of
+        // rehydrating every probed upstream model on each sync.
+        models: syncedModels,
+        modelProfiles: { ...existingProvider.modelProfiles }
+      }
+    : { ...preset, models: syncedModels }
+  const existingIndex = settings.provider.providers.findIndex((item) => item.id === provider.id)
+  const nextProviders = [...settings.provider.providers]
+  if (existingIndex >= 0) nextProviders[existingIndex] = provider
+  else nextProviders.push(provider)
+  const runtime = getKunRuntimeSettings(settings)
+  const nextModel = runtime.providerId === provider.id && !provider.models.includes(runtime.model)
+    ? provider.models[0]
+    : runtime.model
+  const currentProvider = existingIndex >= 0 ? settings.provider.providers[existingIndex] : null
+  const providerUnchanged = currentProvider
+    ? JSON.stringify(currentProvider) === JSON.stringify(provider)
+    : false
+  if (providerUnchanged && nextModel === runtime.model) return settings
+  return store.patch({
+    provider: {
+      ...settings.provider,
+      providers: nextProviders
+    },
+    agents: {
+      kun: {
+        ...(nextModel !== runtime.model ? { model: nextModel } : {})
+      }
+    }
+  })
+}
+
+async function syncNineRouterFeature(settings: AppSettingsV1): Promise<AppSettingsV1> {
+  let current = settings
+  if (shouldAutoEnableNineRouter(current)) {
+    current = await store.patch({ agents: { kun: { nineRouterEnabled: true } } })
+  }
+  const runtime = getKunRuntimeSettings(current)
+  if (runtime.nineRouterEnabled !== true) {
+    await stopNineRouterAndWait()
+    return current
+  }
+  await ensureNineRouterRunning(runtime.dataDir)
+  return ensureNineRouterProviderRegistered(current)
 }
 
 function runtimeJsonError(code: string, message: string): Error {
@@ -244,6 +348,7 @@ async function stopManagedRuntimes(): Promise<void> {
       telegramRuntime?.stop()
       stopWeixinBridgeRuntime()
       await kunRuntimeAdapter.stopAndWait()
+      await stopNineRouterAndWait()
     })().finally(() => {
       managedRuntimesStopPromise = null
     })
@@ -724,7 +829,7 @@ async function superviseKunCrash(info: KunUnexpectedExitInfo): Promise<void> {
   try {
     const settings = await store.load()
     const runtime = getKunRuntimeSettings(settings)
-    if (!resolveConfiguredApiKey(settings) || !runtime.autoStart) {
+    if ((!resolveConfiguredApiKey(settings) && !canStartRuntimeWithoutApiKey(settings)) || !runtime.autoStart) {
       publishRuntimeStatus({
         state: 'stopped',
         source: 'supervisor',
@@ -963,10 +1068,11 @@ async function resolveManagedKunLaunchSettings(
   settings: AppSettingsV1,
   source: string
 ): Promise<AppSettingsV1> {
-  const runtime = getKunRuntimeSettings(settings)
-  if (runtime.binaryPath.trim()) return settings
+  const prepared = await syncNineRouterFeature(settings)
+  const runtime = getKunRuntimeSettings(prepared)
+  if (runtime.binaryPath.trim()) return prepared
   const resolved = await kunRuntimeAdapter.resolveAvailablePort(runtime.port)
-  if (!resolved.changed) return settings
+  if (!resolved.changed) return prepared
 
   const next = await store.patch({ agents: { kun: { port: resolved.port } } })
   lastAppliedSettings = next
@@ -980,7 +1086,7 @@ async function resolveManagedKunLaunchSettings(
 
 async function ensureKunRuntime(settings: AppSettingsV1): Promise<AppSettingsV1> {
   const runtime = getKunRuntimeSettings(settings)
-  const hasApiKey = Boolean(resolveConfiguredApiKey(settings))
+  const hasApiKey = Boolean(resolveConfiguredApiKey(settings)) || canStartRuntimeWithoutApiKey(settings)
 
   const healthy = await waitForKunHealth(settings, 2_000)
   if (healthy) {
@@ -1047,7 +1153,7 @@ async function restartRuntimeOnce(settings: AppSettingsV1): Promise<void> {
   await waitForQueuedRuntimeSettingsApply()
   const runtime = getKunRuntimeSettings(settings)
 
-  if (!resolveConfiguredApiKey(settings)) {
+  if (!resolveConfiguredApiKey(settings) && !canStartRuntimeWithoutApiKey(settings)) {
     throw runtimeJsonError(
       'missing_api_key',
       'DeepSeek API Key is required before the GUI can start Kun.'
@@ -1235,8 +1341,8 @@ async function restartManagedRuntimeForSettingsChange(
   // key, don't kill it on the strength of a key check the new settings fail —
   // leave it running on its current config; the next save with a resolvable
   // key restarts cleanly.
-  const nextHasApiKey = Boolean(resolveConfiguredApiKey(next))
-  if (!nextHasApiKey && Boolean(resolveConfiguredApiKey(prev))) {
+  const nextHasApiKey = Boolean(resolveConfiguredApiKey(next)) || canStartRuntimeWithoutApiKey(next)
+  if (!nextHasApiKey && (Boolean(resolveConfiguredApiKey(prev)) || canStartRuntimeWithoutApiKey(prev))) {
     logWarn(
       'settings-apply',
       'Skipping Kun restart: the new settings resolve to no API key but the running runtime had one — leaving the healthy runtime in place.'
@@ -1295,7 +1401,7 @@ async function rollbackRuntimeSettingsAfterFailedApply(
       message: error instanceof Error ? error.message : String(error)
     })
   }
-  if (!resolveConfiguredApiKey(base) || !getKunRuntimeSettings(base).autoStart) {
+  if ((!resolveConfiguredApiKey(base) && !canStartRuntimeWithoutApiKey(base)) || !getKunRuntimeSettings(base).autoStart) {
     publishRuntimeStatus({
       state: 'stopped',
       source: 'settings-apply',
@@ -1338,7 +1444,7 @@ async function restartManagedRuntimeForMcpConfigChange(settings: AppSettingsV1):
   if (!wasRunning) return
   await waitForManagedRuntimeReadyBeforeStop(settings, 'mcp-config')
   await adapter.stopAndWait()
-  if (!resolveConfiguredApiKey(settings) || !runtime.autoStart) return
+  if ((!resolveConfiguredApiKey(settings) && !canStartRuntimeWithoutApiKey(settings)) || !runtime.autoStart) return
 
   publishRuntimeStatus({ state: 'restarting', source: 'mcp-config' })
   try {
@@ -1417,7 +1523,12 @@ app.whenReady().then(async () => {
 
   store = new JsonSettingsStore(app.getPath('userData'))
   traceStartup('settings load:start')
-  const initial = await store.load()
+  let initial = await store.load()
+  try {
+    initial = await syncNineRouterFeature(initial)
+  } catch (error) {
+    console.warn('[kun-gui] failed to prepare 9router on startup:', error)
+  }
   traceStartup('settings load:done')
   setKunUnexpectedExitHandler(handleUnexpectedKunExit)
   appBehavior = initial.appBehavior
@@ -1505,7 +1616,8 @@ app.whenReady().then(async () => {
     if (runtimeValidationError) {
       throw new Error(`Invalid runtime settings: ${runtimeValidationError}`)
     }
-    const saved = await store.patch(partial)
+    let saved = await store.patch(partial)
+    saved = await syncNineRouterFeature(saved)
     await syncClawScheduleMcpConfig(saved, getClawScheduleMcpLaunchConfig()).catch((error) => {
       console.error('[claw-schedule-mcp] failed to sync config after settings change:', error)
     })
@@ -1528,36 +1640,8 @@ app.whenReady().then(async () => {
     return saved
   }
 
-  const maybeAddNineRouterProvider = async (settings: AppSettingsV1): Promise<AppSettingsV1> => {
-    if (settings.provider.providers.some((provider) => provider.id === '9router')) return settings
-    const preset = modelProviderPresetProfile({
-      id: '9router',
-      name: '9Router',
-      baseUrl: 'http://localhost:20128/v1',
-      endpointFormat: 'chat_completions',
-      models: [],
-      docsUrl: 'https://www.npmjs.com/package/9router',
-      apiKeyUrl: 'https://www.npmjs.com/package/9router'
-    })
-    if (!preset) return settings
-    const probe = await probeModelProvider({
-      baseUrl: preset.baseUrl,
-      apiKey: preset.apiKey,
-      endpointFormat: preset.endpointFormat
-    }, settings)
-    if (!probe.ok || probe.modelIds.length === 0) return settings
-    const provider = { ...preset, models: probe.modelIds }
-    return store.patch({
-      provider: {
-        ...settings.provider,
-        providers: [...settings.provider.providers, provider]
-      },
-      agents: { kun: { providerId: provider.id, model: provider.models[0] } }
-    })
-  }
-
   const fetchModels = async () => {
-    const settings = await maybeAddNineRouterProvider(await store.load())
+    const settings = await syncNineRouterFeature(await store.load())
     const key = resolveConfiguredApiKey(settings)
     return fetchUpstreamModelIds(settings, key)
   }
@@ -1625,7 +1709,7 @@ app.whenReady().then(async () => {
     console.warn('[kun-gui] prune logs:', err)
   })
 
-  if (resolveConfiguredApiKey(initial)) {
+  if (resolveConfiguredApiKey(initial) || canStartRuntimeWithoutApiKey(initial)) {
     setTimeout(() => {
       void kunRuntimeAdapter.resolveExecutable(initial).catch((err) => {
         console.warn('[kun-gui] prewarm Kun binary:', err)
