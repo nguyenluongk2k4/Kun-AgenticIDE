@@ -82,6 +82,8 @@ export function useTimelineScroll({
   const pendingPrependRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null)
   const prependInFlightRef = useRef(false)
   const scrollFrameRef = useRef<number | null>(null)
+  const releaseTopLoadFrameRef = useRef<number | null>(null)
+  const suppressTopLoadRef = useRef(false)
 
   const loadEarlierTurns = useCallback(
     (options?: { userInitiated?: boolean }): void => {
@@ -122,6 +124,7 @@ export function useTimelineScroll({
     const onScroll = (): void => {
       const distanceToBottom = el.scrollHeight - el.scrollTop - el.clientHeight
       stickToBottomRef.current = distanceToBottom < STICK_TO_BOTTOM_PX
+      if (suppressTopLoadRef.current) return
       if (hiddenTurnCount > 0 && el.scrollTop <= TOP_LOAD_TRIGGER_PX) {
         loadEarlierTurns({ userInitiated: true })
       }
@@ -149,6 +152,7 @@ export function useTimelineScroll({
   // Hard reset on thread switch.
   useEffect(() => {
     stickToBottomRef.current = true
+    suppressTopLoadRef.current = true
     historyExpansionRequestedRef.current = false
     pendingPrependRef.current = null
     prependInFlightRef.current = false
@@ -156,7 +160,17 @@ export function useTimelineScroll({
       window.cancelAnimationFrame(scrollFrameRef.current)
       scrollFrameRef.current = null
     }
+    if (releaseTopLoadFrameRef.current !== null) {
+      window.cancelAnimationFrame(releaseTopLoadFrameRef.current)
+      releaseTopLoadFrameRef.current = null
+    }
     endRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' })
+    releaseTopLoadFrameRef.current = window.requestAnimationFrame(() => {
+      releaseTopLoadFrameRef.current = window.requestAnimationFrame(() => {
+        releaseTopLoadFrameRef.current = null
+        suppressTopLoadRef.current = false
+      })
+    })
   }, [activeThreadId, endRef])
 
   // Cleanup any pending rAF on unmount.
@@ -164,6 +178,9 @@ export function useTimelineScroll({
     () => () => {
       if (scrollFrameRef.current !== null) {
         window.cancelAnimationFrame(scrollFrameRef.current)
+      }
+      if (releaseTopLoadFrameRef.current !== null) {
+        window.cancelAnimationFrame(releaseTopLoadFrameRef.current)
       }
     },
     []
