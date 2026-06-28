@@ -1940,7 +1940,7 @@ export function FloatingComposer({
           onDrop={handleComposerDrop}
         >
           {showChangeSummary ? (
-            <div className="ds-no-drag mb-1 rounded-2xl border border-ds-border-muted bg-ds-card/78 px-3 py-2 shadow-sm">
+            <div className="ds-no-drag mb-1 rounded-2xl border border-ds-border-muted bg-ds-card px-3 py-2 shadow-sm">
               <div className="flex min-w-0 items-center gap-2">
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-ds-hover text-ds-muted">
                   <FileEdit className="h-4 w-4" strokeWidth={1.8} />
@@ -2022,7 +2022,7 @@ export function FloatingComposer({
                 return (
                   <span
                     key={`${reference.type ?? 'file'}:${reference.relativePath}`}
-                    className="ds-no-drag inline-flex h-7 max-w-full items-center gap-1.5 rounded-lg border border-ds-border-muted bg-ds-card/80 px-2 text-[12px] font-medium text-ds-muted"
+                    className="ds-no-drag inline-flex h-7 max-w-full items-center gap-1.5 rounded-lg border border-ds-border-muted bg-ds-card px-2 text-[12px] font-medium text-ds-muted"
                     title={displayPath}
                   >
                     {isDirectory ? (
@@ -2059,7 +2059,7 @@ export function FloatingComposer({
                 ) : (
                   <span
                     key={attachment.id}
-                    className="ds-no-drag inline-flex h-7 max-w-full items-center gap-1.5 rounded-lg border border-ds-border-muted bg-ds-card/80 px-2 text-[12px] font-medium text-ds-muted"
+                    className="ds-no-drag inline-flex h-7 max-w-full items-center gap-1.5 rounded-lg border border-ds-border-muted bg-ds-card px-2 text-[12px] font-medium text-ds-muted"
                     title={attachment.id}
                   >
                     <ImagePlus className="h-3.5 w-3.5 shrink-0 text-ds-faint" strokeWidth={1.8} />
@@ -2191,7 +2191,7 @@ export function FloatingComposer({
                   <button
                     type="button"
                     onClick={() => setContextCapacityOpen((open) => !open)}
-                    className="ds-composer-context ds-no-drag relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-ds-border-muted bg-ds-card/70 p-0 text-[9px] font-semibold leading-none text-ds-muted transition hover:bg-ds-hover"
+                    className="ds-composer-context ds-no-drag relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-ds-border-muted bg-ds-card p-0 text-[9px] font-semibold leading-none text-ds-muted transition hover:bg-ds-hover"
                     aria-label={t('contextCapacityChipAria', {
                       percent: formatPercent(contextCapacity.usedRatio)
                     })}
@@ -2317,7 +2317,7 @@ export function FloatingComposer({
             ) : null}
             <GitBranchPicker workspaceRoot={effectiveWorkspaceRoot} />
             {useWorktreePool && worktreeBranches.length > 0 ? (
-              <label className="ds-no-drag inline-flex min-h-7 max-w-[220px] items-center gap-1.5 rounded-lg border border-ds-border-muted bg-ds-card/72 px-2 py-0.5 text-[12.5px] font-medium text-ds-muted shadow-sm">
+              <label className="ds-no-drag inline-flex min-h-7 max-w-[220px] items-center gap-1.5 rounded-lg border border-ds-border-muted bg-ds-card px-2 py-0.5 text-[12.5px] font-medium text-ds-muted shadow-sm">
                 <GitBranch className="h-3.5 w-3.5 shrink-0" strokeWidth={1.8} />
                 <select
                   value={worktreeBranch || worktreeBranches[0]}
@@ -2335,7 +2335,7 @@ export function FloatingComposer({
             ) : null}
             {showThreadUsageFooter ? (
               <div
-                className="ds-composer-usage ds-no-drag inline-flex min-h-7 max-w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 overflow-visible rounded-lg border border-ds-border-muted bg-ds-card/72 px-2.5 py-0.5 text-[12.5px] font-medium leading-5 text-ds-muted shadow-sm"
+                className="ds-composer-usage ds-no-drag inline-flex min-h-7 max-w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 overflow-visible rounded-lg border border-ds-border-muted bg-ds-card px-2.5 py-0.5 text-[12.5px] font-medium leading-5 text-ds-muted shadow-sm"
                 title={
                   threadUsage
                     ? t(
