@@ -88,6 +88,7 @@ export type SettingsRouteSection =
   | 'speechToText'
   | 'agents'
   | 'archives'
+  | 'sync'
   | 'permissions'
   | 'skill'
   | 'mcp'

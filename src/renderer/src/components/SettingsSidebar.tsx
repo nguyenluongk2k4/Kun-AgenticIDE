@@ -1,7 +1,7 @@
 import type { Dispatch, ReactElement, SetStateAction } from 'react'
-import { Archive, AudioLines, Bot, BrainCircuit, GitBranch, Bug, ChevronLeft, Globe, Keyboard, Mic, PencilLine, RefreshCw, ServerCog, Settings, Smartphone, Sparkles, TerminalSquare } from 'lucide-react'
+import { Archive, AudioLines, Bot, BrainCircuit, GitBranch, Bug, ChevronLeft, Globe, Keyboard, Mic, PencilLine, RefreshCw, ServerCog, Settings, Smartphone, Sparkles, TerminalSquare, Upload } from 'lucide-react'
 
-type SettingsCategory = 'general' | 'providers' | 'write' | 'mediaGeneration' | 'speechToText' | 'agents' | 'archives' | 'permissions' | 'worktree' | 'memory' | 'shortcuts' | 'easterEgg' | 'claw' | 'updates' | 'debug' | 'terminal'
+type SettingsCategory = 'general' | 'providers' | 'write' | 'mediaGeneration' | 'speechToText' | 'agents' | 'archives' | 'permissions' | 'worktree' | 'memory' | 'sync' | 'shortcuts' | 'easterEgg' | 'claw' | 'updates' | 'debug' | 'terminal'
 
 export function SettingsSidebar({
   category,
@@ -116,6 +116,15 @@ export function SettingsSidebar({
         >
           <BrainCircuit className="h-4 w-4 shrink-0 opacity-70" strokeWidth={1.75} />
           {t('memory')}
+        </button>
+        <button
+          type="button"
+          data-cursor-spotlight-target
+          className={catCls('sync')}
+          onClick={() => setCategory('sync')}
+        >
+          <Upload className="h-4 w-4 shrink-0 opacity-70" strokeWidth={1.75} />
+          {t('sync')}
         </button>
         <button
           type="button"

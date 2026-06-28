@@ -66,6 +66,7 @@ import {
   WorktreeSettingsSection,
   MediaGenerationSettingsSection,
   MemorySettingsSection,
+  SyncSettingsSection,
   ProvidersSettingsSection,
   SpeechToTextSettingsSection,
   UpdatesSettingsSection,
@@ -73,7 +74,7 @@ import {
   TerminalSettingsSection
 } from './settings-sections'
 
-type SettingsCategory = 'general' | 'providers' | 'write' | 'mediaGeneration' | 'speechToText' | 'agents' | 'archives' | 'permissions' | 'worktree' | 'memory' | 'shortcuts' | 'easterEgg' | 'claw' | 'updates' | 'debug' | 'terminal'
+type SettingsCategory = 'general' | 'providers' | 'write' | 'mediaGeneration' | 'speechToText' | 'agents' | 'archives' | 'permissions' | 'worktree' | 'memory' | 'sync' | 'shortcuts' | 'easterEgg' | 'claw' | 'updates' | 'debug' | 'terminal'
 type SaveStatus = 'idle' | 'saving' | 'saved' | 'error'
 type SettingsPatch = AppSettingsPatch
 type InlineNotice = {
@@ -305,6 +306,10 @@ export function SettingsView(): ReactElement {
       setCategory('archives')
       return
     }
+    if (settingsSection === 'sync') {
+      setCategory('sync')
+      return
+    }
     if (settingsSection === 'claw') {
       setCategory('claw')
       return
@@ -338,6 +343,7 @@ export function SettingsView(): ReactElement {
       settingsSection === 'mediaGeneration' ||
       settingsSection === 'speechToText' ||
       settingsSection === 'archives' ||
+      settingsSection === 'sync' ||
       settingsSection === 'claw' ||
       settingsSection === 'shortcuts' ||
       settingsSection === 'easterEgg' ||
@@ -352,6 +358,7 @@ export function SettingsView(): ReactElement {
       HTMLDivElement | null
     > = {
       agents: agentsSectionRef.current,
+      sync: null,
       skill: skillSectionRef.current,
       mcp: mcpSectionRef.current,
       permissions: permissionsSectionRef.current
@@ -1038,6 +1045,7 @@ export function SettingsView(): ReactElement {
           {category === 'archives' ? <ArchivedThreadsSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'worktree' ? <WorktreeSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'memory' ? <MemorySettingsSection ctx={settingsSectionContext} /> : null}
+          {category === 'sync' ? <SyncSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'shortcuts' ? <KeyboardShortcutsSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'easterEgg' ? <EasterEggSettingsSection ctx={settingsSectionContext} /> : null}
           {category === 'claw' ? <ClawSettingsSection ctx={settingsSectionContext} /> : null}

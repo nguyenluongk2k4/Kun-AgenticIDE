@@ -53,6 +53,10 @@ const api = {
     ipcRenderer.invoke('kun:sessions:import-legacy', { sourceDir }),
   pickLegacySessionDir: () =>
     ipcRenderer.invoke('kun:sessions:pick-source-dir'),
+  detectExternalSyncSources: () =>
+    ipcRenderer.invoke('kun:sessions:detect-external-sync'),
+  importExternalSyncSources: (request) =>
+    ipcRenderer.invoke('kun:sessions:import-external-sync', request ?? {}),
   listSkills: (workspaceRoot) =>
     ipcRenderer.invoke('skill:list', { workspaceRoot }),
   listSkillRoots: (workspaceRoot) =>

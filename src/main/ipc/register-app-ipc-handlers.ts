@@ -93,10 +93,12 @@ import {
   writePrototypeFilePayloadSchema,
   writeRetrievalPayloadSchema,
   workspaceRootSchema,
-  legacySessionImportPayloadSchema
+  legacySessionImportPayloadSchema,
+  externalSyncImportPayloadSchema
 } from './app-ipc-schemas'
 import { DEFAULT_KUN_DATA_DIR, resolveKunRuntimeSettings } from '../../shared/app-settings'
 import { detectLegacySessions, importLegacySessions } from '../services/legacy-session-import-service'
+import { detectExternalSyncSources, importExternalSyncSources } from '../services/external-session-sync-service'
 import type { JsonSettingsStore } from '../settings-store'
 import { probeModelProvider } from '../provider-connection'
 import type { ClawRuntime } from '../claw-runtime'
@@ -922,6 +924,43 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
     return {
       canceled: result.canceled,
       path: result.canceled ? null : (result.filePaths[0] ?? null)
+    }
+  })
+
+  ipcMain.handle('kun:sessions:detect-external-sync', async () => {
+    const settings = await store.load()
+    return detectExternalSyncSources({
+      homeDir: homedir(),
+      destDataDir: await resolveKunThreadsDataDir(),
+      defaultWorkspace: settings.workspaceRoot || homedir()
+    })
+  })
+
+  ipcMain.handle('kun:sessions:import-external-sync', async (_, payload: unknown) => {
+    try {
+      const request = parseIpcPayload(
+        'kun:sessions:import-external-sync',
+        externalSyncImportPayloadSchema,
+        payload ?? {}
+      )
+      const settings = await store.load()
+      const runtime = resolveKunRuntimeSettings(settings)
+      const summary = await importExternalSyncSources({
+        homeDir: homedir(),
+        destDataDir: await resolveKunThreadsDataDir(),
+        defaultWorkspace: settings.workspaceRoot || homedir(),
+        defaultModel: runtime.model,
+        sourceIds: request.sourceIds,
+        includeConversations: request.includeConversations,
+        includeMemories: request.includeMemories,
+        log: (message, detail) => logError('external-sync', message, detail)
+      })
+      return { ok: true as const, ...summary }
+    } catch (error) {
+      return {
+        ok: false as const,
+        message: error instanceof Error ? error.message : String(error)
+      }
     }
   })
 

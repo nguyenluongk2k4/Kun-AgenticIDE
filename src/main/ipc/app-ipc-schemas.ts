@@ -116,6 +116,14 @@ export const legacySessionImportPayloadSchema = z
   })
   .strict()
 
+export const externalSyncImportPayloadSchema = z
+  .object({
+    sourceIds: z.array(trimmedString(128)).max(16).optional(),
+    includeConversations: z.boolean().optional(),
+    includeMemories: z.boolean().optional()
+  })
+  .strict()
+
 export const providerProbePayloadSchema = z
   .object({
     baseUrl: trimmedString(MAX_URL_LENGTH),

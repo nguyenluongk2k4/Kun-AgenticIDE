@@ -23,7 +23,7 @@ export async function loadKunDiagnostics(
     provider.getRuntimeInfo ? provider.getRuntimeInfo() : Promise.resolve(null),
     provider.getToolDiagnostics ? provider.getToolDiagnostics() : Promise.resolve(null),
     provider.listMemories
-      ? provider.listMemories({ workspace: options.workspace, includeDeleted: false })
+      ? provider.listMemories({ includeDeleted: false })
       : Promise.resolve([])
   ])
 

@@ -263,6 +263,54 @@ export type LegacySessionImportSummary = {
 export type LegacySessionImportResult =
   | ({ ok: true } & LegacySessionImportSummary)
   | { ok: false; message: string }
+export type ExternalSyncSourceKind = 'codex' | 'claude'
+export type ExternalSyncDetectedSource = {
+  id: string
+  kind: ExternalSyncSourceKind
+  path: string
+  conversationCount: number
+  newConversationCount: number
+  memoryCount: number
+  newMemoryCount: number
+  note?: string
+}
+export type ExternalSyncDetectResult = {
+  destThreadsDir: string
+  destMemoryDir: string
+  sources: ExternalSyncDetectedSource[]
+  unsupported: Array<{ kind: string; note: string }>
+}
+export type ExternalSyncSourceSummary = {
+  kind: ExternalSyncSourceKind
+  path: string
+  conversationsTotal: number
+  conversationsImported: number
+  conversationsSkipped: number
+  memoriesTotal: number
+  memoriesImported: number
+  memoriesSkipped: number
+}
+export type ExternalSyncImportSummary = {
+  destThreadsDir: string
+  destMemoryDir: string
+  conversationsTotal: number
+  conversationsImported: number
+  conversationsSkipped: number
+  memoriesTotal: number
+  memoriesImported: number
+  memoriesSkipped: number
+  workspaceRoots: string[]
+  sources: ExternalSyncSourceSummary[]
+  warnings: string[]
+}
+export type ExternalSyncImportResult =
+  | ({ ok: true } & ExternalSyncImportSummary)
+  | { ok: false; message: string }
+export type ExternalSyncImportRequest = {
+  sourceIds?: string[]
+  includeConversations?: boolean
+  includeMemories?: boolean
+}
 /** One IPC message carries every SSE event parsed from a network chunk. */
 export type SseEventPayload = { streamId: string; events: unknown[] }
 export type SseEndPayload = { streamId: string }
@@ -324,6 +372,10 @@ export type KunGuiApi = {
   importLegacySessions: (sourceDir?: string) => Promise<LegacySessionImportResult>
   /** Open a directory picker for choosing a legacy conversations folder. */
   pickLegacySessionDir: () => Promise<WorkspacePickResult>
+  /** Detect chats and memory that can be synced from supported external assistants. */
+  detectExternalSyncSources: () => Promise<ExternalSyncDetectResult>
+  /** Import supported external assistant chats + memory into Kun. */
+  importExternalSyncSources: (request?: ExternalSyncImportRequest) => Promise<ExternalSyncImportResult>
   listSkills: (workspaceRoot?: string) => Promise<SkillListResult>
   listSkillRoots: (workspaceRoot?: string) => Promise<SkillRootListResult>
   saveSkillFile: (
