@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 import {
   CopyObjectCommand,
   GetObjectCommand,
@@ -12,6 +12,7 @@ import { readFileSync, existsSync } from 'node:fs'
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { basename, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { execFileSync } from 'node:child_process'
 
 const PRODUCT_NAME = 'Kun'
 const DEFAULT_RELEASE_PREFIX = 'deepseek-gui'
@@ -20,6 +21,27 @@ const PLATFORMS = ['mac', 'win', 'linux']
 const RELEASE_CHANNELS = ['frontier', 'stable']
 const SCRIPT_DIR = fileURLToPath(new URL('.', import.meta.url))
 const ROOT = resolve(SCRIPT_DIR, '..')
+
+function normalizeGithubOwnerRepo(raw) {
+  const value = String(raw || '').trim()
+  if (!value) return ''
+  const stripped = value.startsWith('github:') ? value.slice('github:'.length).trim() : value
+  const ssh = stripped.match(/^git@github\.com:([\w.-]+\/[\w.-]+?)(?:\.git)?$/i)
+  if (ssh?.[1]) return ssh[1].replace(/\.git$/i, '').replace(/^\/+|\/+$/g, '')
+  const https = stripped.match(/github\.com\/([\w.-]+\/[\w.-]+?)(?:\.git)?(?:$|[#/])/i)
+  if (https?.[1]) return https[1].replace(/\.git$/i, '').replace(/^\/+|\/+$/g, '')
+  return /^[\w.-]+\/[\w.-]+$/.test(stripped) ? stripped : ''
+}
+
+function resolveGithubRepo() {
+  const envRepo = normalizeGithubOwnerRepo(process.env.KUN_GITHUB_REPO || process.env.DEEPSEEK_GUI_GITHUB_REPO || '')
+  if (envRepo) return envRepo
+  try {
+    return normalizeGithubOwnerRepo(execFileSync('git', ['remote', 'get-url', 'origin'], { encoding: 'utf8', cwd: ROOT })) || 'KunAgent/Kun'
+  } catch {
+    return 'KunAgent/Kun'
+  }
+}
 
 const PLATFORM_SPECS = {
   mac: {
@@ -633,7 +655,7 @@ async function promoteRelease({ flags, dryRun }) {
       tag,
       releaseDate,
       generatedAt: new Date().toISOString(),
-      githubReleaseUrl: `https://github.com/KunAgent/Kun/releases/tag/${tag}`,
+      githubReleaseUrl: `https://github.com/${resolveGithubRepo()}/releases/tag/${tag}`,
       updateBaseUrl: joinUrl(config.publicBaseUrl, target.basePath, 'latest') + '/',
       updateMetadata: Object.fromEntries(
         platformManifests.map((manifest) => [
@@ -684,3 +706,4 @@ main().catch((error) => {
   console.error(`[publish-r2] ${error instanceof Error ? error.message : String(error)}`)
   process.exitCode = 1
 })
+

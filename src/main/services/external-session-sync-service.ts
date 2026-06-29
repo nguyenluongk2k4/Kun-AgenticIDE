@@ -15,7 +15,13 @@ import type { Turn } from '../../../kun/src/contracts/turns.js'
 import type { AgentSession } from '../../../kun/src/domain/session.js'
 import { FileThreadStore } from '../../../kun/src/adapters/file/file-thread-store.js'
 import { FileSessionStore } from '../../../kun/src/adapters/file/file-session-store.js'
+import { HybridSessionStore } from '../../../kun/src/adapters/hybrid/hybrid-session-store.js'
+import { HybridThreadStore } from '../../../kun/src/adapters/hybrid/hybrid-thread-store.js'
 import { MemoryRecord } from '../../../kun/src/contracts/memory.js'
+import { expandHomePath } from '../../../kun/src/config/kun-config.js'
+import type { ThreadStore } from '../../../kun/src/ports/thread-store.js'
+import type { SessionStore } from '../../../kun/src/ports/session-store.js'
+import type { KunStorageSettingsV1 } from '../../shared/app-settings-types.js'
 
 type ExternalSyncLogger = (message: string, detail?: unknown) => void
 
@@ -56,6 +62,7 @@ export async function detectExternalSyncSources(input: {
   destDataDir: string
   homeDir?: string
   defaultWorkspace: string
+  storage?: KunStorageSettingsV1
 }): Promise<ExternalSyncDetectResult> {
   const homeDir = input.homeDir ?? homedir()
   const data = await collectExternalSyncSources({
@@ -64,14 +71,16 @@ export async function detectExternalSyncSources(input: {
   })
   const destThreadsDir = join(resolve(input.destDataDir), 'threads')
   const destMemoryDir = join(resolve(input.destDataDir), 'memory')
-  return {
+  const stores = await createSyncStores(resolve(input.destDataDir), input.storage)
+  try {
+    return {
     destThreadsDir,
     destMemoryDir,
     sources: await Promise.all(
       data.map(async (entry) => ({
         ...entry.source,
-        newConversationCount: await countMissingConversationImports(destThreadsDir, entry.conversations),
-        newMemoryCount: await countMissingMemoryImports(destMemoryDir, entry.memories)
+        newConversationCount: await countPendingConversationImports(stores.threadStore, entry.conversations),
+        newMemoryCount: await countPendingMemoryImports(destMemoryDir, entry.memories)
       }))
     ),
     unsupported: [
@@ -80,6 +89,9 @@ export async function detectExternalSyncSources(input: {
         note: 'No stable local conversation or memory store was detected for Antigravity yet.'
       }
     ]
+  }
+  } finally {
+    await stores.shutdown?.()
   }
 }
 
@@ -91,6 +103,7 @@ export async function importExternalSyncSources(input: {
   sourceIds?: string[]
   includeConversations?: boolean
   includeMemories?: boolean
+  storage?: KunStorageSettingsV1
   log?: ExternalSyncLogger
 }): Promise<ExternalSyncImportSummary> {
   const homeDir = input.homeDir ?? homedir()
@@ -102,8 +115,9 @@ export async function importExternalSyncSources(input: {
   const includeConversations = input.includeConversations !== false
   const includeMemories = input.includeMemories !== false
   const destDataDir = resolve(input.destDataDir)
-  const threadStore = new FileThreadStore({ dataDir: destDataDir })
-  const sessionStore = new FileSessionStore({ dataDir: destDataDir })
+  const stores = await createSyncStores(destDataDir, input.storage)
+  const threadStore = stores.threadStore
+  const sessionStore = stores.sessionStore
   await mkdir(join(destDataDir, 'threads'), { recursive: true })
   await mkdir(join(destDataDir, 'memory'), { recursive: true })
 
@@ -139,7 +153,7 @@ export async function importExternalSyncSources(input: {
       for (const conversation of entry.conversations) {
         summary.conversationsTotal += 1
         const existing = await threadStore.get(conversation.id)
-        if (existing) {
+        if (!(await shouldImportConversation(existing, conversation))) {
           summary.conversationsSkipped += 1
           sourceSummary.conversationsSkipped += 1
           continue
@@ -182,9 +196,7 @@ export async function importExternalSyncSources(input: {
           }
 
           await threadStore.upsert(thread)
-          for (const item of conversation.items) {
-            await sessionStore.appendItem(conversation.id, item)
-          }
+          await sessionStore.rewriteItems(conversation.id, conversation.items)
           await sessionStore.upsertSession(session)
           if (conversation.workspace.trim()) importedWorkspaceRoots.add(conversation.workspace.trim())
           summary.conversationsImported += 1
@@ -207,8 +219,8 @@ export async function importExternalSyncSources(input: {
       for (const memory of entry.memories) {
         summary.memoriesTotal += 1
         const filePath = join(destDataDir, 'memory', `${memory.id}.json`)
-        const exists = await pathExists(filePath)
-        if (exists) {
+        const existingRecord = await readMemoryRecord(filePath)
+        if (!(await shouldImportMemory(existingRecord, memory))) {
           summary.memoriesSkipped += 1
           sourceSummary.memoriesSkipped += 1
           continue
@@ -252,6 +264,7 @@ export async function importExternalSyncSources(input: {
   }
 
   summary.workspaceRoots = [...importedWorkspaceRoots]
+  await stores.shutdown?.()
   return summary
 }
 
@@ -346,6 +359,7 @@ async function parseCodexConversation(
   const lines = parseJsonLines(text)
   const sessionMeta = lines.find((line) => fieldString(line, 'type') === 'session_meta')
   const workspace = fieldString(recordValue(sessionMeta, 'payload'), 'cwd') ?? defaultWorkspace
+  const sourceTitle = extractImportedConversationTitle(lines, sessionMeta)
   const messages: Array<{ role: 'user' | 'assistant'; text: string; at: string }> = []
   for (const line of lines) {
     const payload = recordValue(line, 'payload')
@@ -365,6 +379,7 @@ async function parseCodexConversation(
     sourceKind: 'codex',
     sourcePath: filePath,
     workspace,
+    sourceTitle,
     messages
   })
 }
@@ -376,6 +391,7 @@ async function parseClaudeConversation(
   const text = await safeReadUtf8(filePath)
   if (!text) return null
   const lines = parseJsonLines(text)
+  const sourceTitle = extractImportedConversationTitle(lines)
   const messages: Array<{ role: 'user' | 'assistant'; text: string; at: string }> = []
   for (const line of lines) {
     const message = recordValue(line, 'message')
@@ -397,6 +413,7 @@ async function parseClaudeConversation(
     sourceKind: 'claude',
     sourcePath: filePath,
     workspace,
+    sourceTitle,
     messages
   })
 }
@@ -405,6 +422,7 @@ function buildImportedConversation(input: {
   sourceKind: ExternalSyncSourceKind
   sourcePath: string
   workspace: string
+  sourceTitle?: string
   messages: Array<{ role: 'user' | 'assistant'; text: string; at: string }>
 }): ExternalConversation | null {
   if (input.messages.length === 0) return null
@@ -413,7 +431,7 @@ function buildImportedConversation(input: {
   const createdAt = input.messages[0]?.at ?? new Date().toISOString()
   const updatedAt = input.messages[input.messages.length - 1]?.at ?? createdAt
   const prompt = input.messages.find((message) => message.role === 'user')?.text ?? 'Imported conversation'
-  const title = `Imported ${labelForKind(input.sourceKind)} - ${compactTitle(prompt)}`
+  const title = compactTitle(input.sourceTitle ?? prompt)
   const items = input.messages.map((message, index): TurnItem => {
     const base = {
       id: `${shortHash(`${input.sourcePath}:${index}:${message.role}`)}_${index}`,
@@ -615,8 +633,74 @@ function compactTitle(text: string): string {
   return normalized.length > 72 ? `${normalized.slice(0, 69)}...` : normalized
 }
 
-function labelForKind(kind: ExternalSyncSourceKind): string {
-  return kind === 'codex' ? 'Codex' : 'Claude'
+function extractImportedConversationTitle(
+  lines: Record<string, unknown>[],
+  sessionMeta?: Record<string, unknown>
+): string | undefined {
+  const candidates: unknown[] = []
+  if (sessionMeta) {
+    candidates.push(sessionMeta, recordValue(sessionMeta, 'payload'))
+  }
+  for (const line of lines) {
+    candidates.push(
+      line,
+      recordValue(line, 'payload'),
+      recordValue(line, 'message'),
+      fieldValue(line, 'content')
+    )
+  }
+
+  for (const candidate of candidates) {
+    const title = extractTitleCandidate(candidate)
+    if (title) return title
+  }
+  return undefined
+}
+
+function extractTitleCandidate(value: unknown): string | undefined {
+  if (!value) return undefined
+  if (typeof value === 'string') return cleanImportedTitle(value)
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const nested = extractTitleCandidate(item)
+      if (nested) return nested
+    }
+    return undefined
+  }
+  if (typeof value !== 'object') return undefined
+
+  const record = value as Record<string, unknown>
+  const directKeys = [
+    'title',
+    'chat_title',
+    'conversation_title',
+    'session_title',
+    'name',
+    'summary',
+    'label'
+  ]
+  for (const key of directKeys) {
+    const title = cleanImportedTitle(stringValue(record[key]))
+    if (title) return title
+  }
+
+  const nestedKeys = ['session', 'conversation', 'chat', 'metadata', 'meta', 'payload', 'message']
+  for (const key of nestedKeys) {
+    const nested = extractTitleCandidate(record[key])
+    if (nested) return nested
+  }
+  return undefined
+}
+
+function cleanImportedTitle(value: string | undefined): string | undefined {
+  if (!value) return undefined
+  const normalized = value.replace(/\s+/g, ' ').trim()
+  if (!normalized) return undefined
+  if (normalized.length < 4) return undefined
+  if (/^[0-9a-f]{8,}$/i.test(normalized.replace(/-/g, ''))) return undefined
+  if (/^[A-Za-z]:\\/.test(normalized)) return undefined
+  if (/[{}[\]]/.test(normalized)) return undefined
+  return normalized
 }
 
 function shortHash(value: string): string {
@@ -667,24 +751,98 @@ function fieldString(value: unknown, key: string): string | undefined {
   return stringValue(fieldValue(value, key))
 }
 
-async function countMissingConversationImports(
-  destThreadsDir: string,
+async function countPendingConversationImports(
+  threadStore: ThreadStore,
   conversations: ExternalConversation[]
 ): Promise<number> {
   const checks = await Promise.all(
-    conversations.map((conversation) => pathExists(join(destThreadsDir, conversation.id, 'thread.json')))
+    conversations.map(async (conversation) => {
+      const existing = await threadStore.get(conversation.id)
+      return shouldImportConversation(existing, conversation)
+    })
   )
-  return checks.filter((exists) => !exists).length
+  return checks.filter(Boolean).length
 }
 
-async function countMissingMemoryImports(
+async function countPendingMemoryImports(
   destMemoryDir: string,
   memories: ExternalMemoryChunk[]
 ): Promise<number> {
   const checks = await Promise.all(
-    memories.map((memory) => pathExists(join(destMemoryDir, `${memory.id}.json`)))
+    memories.map(async (memory) => {
+      const existing = await readMemoryRecord(join(destMemoryDir, `${memory.id}.json`))
+      return shouldImportMemory(existing, memory)
+    })
   )
-  return checks.filter((exists) => !exists).length
+  return checks.filter(Boolean).length
+}
+
+async function shouldImportConversation(
+  existing: Awaited<ReturnType<ThreadStore['get']>>,
+  conversation: ExternalConversation
+): Promise<boolean> {
+  if (!existing) return true
+  if (timestampMs(conversation.updatedAt) > timestampMs(existing.updatedAt)) return true
+  if ((existing.title ?? '').trim() !== conversation.title.trim()) return true
+  if ((existing.workspace ?? '').trim() !== conversation.workspace.trim()) return true
+  const existingItems = existing.turns.flatMap((turn) => turn.items ?? [])
+  return existingItems.length !== conversation.items.length
+}
+
+async function shouldImportMemory(
+  existing: MemoryRecord | null,
+  memory: ExternalMemoryChunk
+): Promise<boolean> {
+  if (!existing) return true
+  if (existing.content !== memory.content) return true
+  if (existing.scope !== memory.scope) return true
+  if ((existing.workspace ?? '') !== (memory.workspace ?? '')) return true
+  if ((existing.project ?? '') !== (memory.project ?? '')) return true
+  return JSON.stringify(existing.tags ?? []) !== JSON.stringify(memory.tags)
+}
+
+async function readMemoryRecord(path: string): Promise<MemoryRecord | null> {
+  try {
+    const raw = await readFile(path, 'utf-8')
+    return MemoryRecord.parse(JSON.parse(raw))
+  } catch {
+    return null
+  }
+}
+
+function timestampMs(value: string | undefined): number {
+  const parsed = value ? Date.parse(value) : Number.NaN
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+async function createSyncStores(
+  dataDir: string,
+  storage?: KunStorageSettingsV1
+): Promise<{ threadStore: ThreadStore; sessionStore: SessionStore; shutdown?: () => Promise<void> }> {
+  if (storage?.backend === 'file') {
+    return {
+      threadStore: new FileThreadStore({ dataDir }),
+      sessionStore: new FileSessionStore({ dataDir })
+    }
+  }
+
+  const sqlitePath = storage?.sqlitePath?.trim() ? expandHomePath(storage.sqlitePath.trim()) : undefined
+  const threadStore = new HybridThreadStore({
+    dataDir,
+    sqlitePath,
+    nowIso: () => new Date().toISOString()
+  })
+  await threadStore.ready()
+  return {
+    threadStore,
+    sessionStore: new HybridSessionStore({
+      dataDir,
+      index: threadStore
+    }),
+    shutdown: async () => {
+      threadStore.close()
+    }
+  }
 }
 
 async function writeJsonFile(path: string, value: unknown): Promise<void> {

@@ -1,5 +1,6 @@
 const { existsSync, readFileSync } = require('node:fs')
 const { join } = require('node:path')
+const { execFileSync } = require('node:child_process')
 
 // 品牌升级后构建环境变量改用 KUN_* 前缀;旧的 DEEPSEEK_GUI_* 仍然
 // 兼容读取,避免 CI / 本地发布脚本一刀切失效。
@@ -79,6 +80,49 @@ function normalizeUpdateChannel(raw) {
   if (value === 'stable' || value === 'frontier') return value
   throw new Error(`KUN_UPDATE_CHANNEL (or legacy DEEPSEEK_GUI_UPDATE_CHANNEL) must be "stable" or "frontier", got: ${raw}`)
 }
+
+function normalizeGithubOwnerRepo(raw) {
+  const value = String(raw || '').trim()
+  if (!value) return ''
+  const stripped = value.startsWith('github:') ? value.slice('github:'.length).trim() : value
+  const ssh = stripped.match(/^git@github\.com:([\w.-]+\/[\w.-]+?)(?:\.git)?$/i)
+  if (ssh?.[1]) return ssh[1].replace(/\.git$/i, '').replace(/^\/+|\/+$/g, '')
+  const https = stripped.match(/github\.com\/([\w.-]+\/[\w.-]+?)(?:\.git)?(?:$|[#/])/i)
+  if (https?.[1]) return https[1].replace(/\.git$/i, '').replace(/^\/+|\/+$/g, '')
+  return /^[\w.-]+\/[\w.-]+$/.test(stripped) ? stripped : ''
+}
+
+function detectGithubRepoFromGit() {
+  try {
+    return normalizeGithubOwnerRepo(
+      execFileSync('git', ['remote', 'get-url', 'origin'], { encoding: 'utf8', cwd: __dirname }).trim()
+    )
+  } catch {
+    return ''
+  }
+}
+
+function packageJsonGithubRepo() {
+  try {
+    const pkg = JSON.parse(readFileSync(join(__dirname, 'package.json'), 'utf8'))
+    const repository =
+      typeof pkg?.repository === 'string'
+        ? pkg.repository
+        : pkg?.repository && typeof pkg.repository === 'object'
+          ? pkg.repository.url
+          : ''
+    return normalizeGithubOwnerRepo(repository || pkg?.homepage || '')
+  } catch {
+    return ''
+  }
+}
+
+const githubRepo =
+  normalizeGithubOwnerRepo(envWithLegacyFallback('KUN_GITHUB_REPO', 'DEEPSEEK_GUI_GITHUB_REPO')) ||
+  detectGithubRepoFromGit() ||
+  packageJsonGithubRepo() ||
+  'KunAgent/Kun'
+const githubRepoUrl = `https://github.com/${githubRepo}`
 
 if (releaseAppVersion && !semverVersionPattern.test(releaseAppVersion)) {
   throw new Error(
@@ -209,6 +253,12 @@ module.exports = {
   },
   extraMetadata: {
     ...(releaseAppVersion ? { version: releaseAppVersion } : {}),
+    homepage: githubRepoUrl,
+    repository: {
+      type: 'git',
+      url: `${githubRepoUrl}.git`
+    },
+    githubRepo,
     updateChannel,
     buildHints: {
       macSigningEnabled: hasExplicitMacSigningIdentity,

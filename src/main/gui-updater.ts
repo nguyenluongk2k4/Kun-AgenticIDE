@@ -50,8 +50,6 @@ let backgroundCheckPromise: Promise<void> | null = null
 
 const GUI_UPDATE_SCHEDULE_FILE = 'gui-update-schedule.json'
 const GUI_VERSION_STATE_FILE = 'gui-version-state.json'
-const DEFAULT_CHANGELOG_URL = 'https://deepseek-gui.com/changelog'
-
 type GuiVersionState = {
   lastSeenVersion?: string
   pendingUpdate?: {
@@ -166,7 +164,11 @@ async function writeGuiVersionState(state: GuiVersionState): Promise<void> {
 }
 
 function changelogUrl(): string {
-  return envWithLegacyFallback('KUN_CHANGELOG_URL', 'DEEPSEEK_GUI_CHANGELOG_URL') || DEFAULT_CHANGELOG_URL
+  return (
+    envWithLegacyFallback('KUN_CHANGELOG_URL', 'DEEPSEEK_GUI_CHANGELOG_URL') ||
+    resolveGithubReleaseUrl() ||
+    updateFeedUrl(configuredChannel)
+  )
 }
 
 function normalizeReleaseNotes(value: unknown): string | undefined {
@@ -248,10 +250,14 @@ function readPackageJson(): Record<string, unknown> | null {
 }
 
 function resolveGithubReleaseUrl(): string | null {
-  const envRepo = normalizeGithubOwnerRepo(process.env.DEEPSEEK_GUI_GITHUB_REPO?.trim() ?? '')
+  const envRepo = normalizeGithubOwnerRepo(
+    envWithLegacyFallback('KUN_GITHUB_REPO', 'DEEPSEEK_GUI_GITHUB_REPO')
+  )
   if (envRepo) return `https://github.com/${envRepo}/releases`
 
   const pkg = readPackageJson()
+  const packagedRepo = normalizeGithubOwnerRepo(String(pkg?.githubRepo ?? ''))
+  if (packagedRepo) return `https://github.com/${packagedRepo}/releases`
   const repository = pkg?.repository
   const raw =
     typeof repository === 'string'

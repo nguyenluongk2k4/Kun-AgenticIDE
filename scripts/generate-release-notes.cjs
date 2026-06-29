@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 /**
  * Build GitHub release notes from conventional commits since the previous tag.
  *
@@ -15,16 +15,37 @@ const CONVENTIONAL =
   /^(feat|fix|perf|refactor|docs|chore|test|build|ci)(\([\w./-]+\))?!?:\s*(.+)$/i
 
 const GROUPS = [
-  { key: 'feat', heading: '### ✨ 新功能' },
-  { key: 'fix', heading: '### 🐛 修复' },
-  { key: 'perf', heading: '### ⚡ 性能' },
-  { key: 'refactor', heading: '### ♻️ 重构' },
-  { key: 'docs', heading: '### 📝 文档' },
-  { key: 'other', heading: '### 📦 其他' }
+  { key: 'feat', heading: '### âœ¨ æ–°åŠŸèƒ½' },
+  { key: 'fix', heading: '### ðŸ› ä¿®å¤' },
+  { key: 'perf', heading: '### âš¡ æ€§èƒ½' },
+  { key: 'refactor', heading: '### â™»ï¸ é‡æž„' },
+  { key: 'docs', heading: '### ðŸ“ æ–‡æ¡£' },
+  { key: 'other', heading: '### ðŸ“¦ å…¶ä»–' }
 ]
 
 function git(args) {
   return execFileSync('git', args, { encoding: 'utf8', cwd: process.cwd() }).trim()
+}
+
+function normalizeGithubOwnerRepo(raw) {
+  const value = String(raw || '').trim()
+  if (!value) return ''
+  const stripped = value.startsWith('github:') ? value.slice('github:'.length).trim() : value
+  const ssh = stripped.match(/^git@github\.com:([\w.-]+\/[\w.-]+?)(?:\.git)?$/i)
+  if (ssh?.[1]) return ssh[1].replace(/\.git$/i, '').replace(/^\/+|\/+$/g, '')
+  const https = stripped.match(/github\.com\/([\w.-]+\/[\w.-]+?)(?:\.git)?(?:$|[#/])/i)
+  if (https?.[1]) return https[1].replace(/\.git$/i, '').replace(/^\/+|\/+$/g, '')
+  return /^[\w.-]+\/[\w.-]+$/.test(stripped) ? stripped : ''
+}
+
+function resolveGithubRepo() {
+  const envRepo = normalizeGithubOwnerRepo(process.env.KUN_GITHUB_REPO || process.env.DEEPSEEK_GUI_GITHUB_REPO || '')
+  if (envRepo) return envRepo
+  try {
+    return normalizeGithubOwnerRepo(git(['remote', 'get-url', 'origin'])) || 'KunAgent/Kun'
+  } catch {
+    return 'KunAgent/Kun'
+  }
 }
 
 function resolveSinceTag(arg) {
@@ -70,11 +91,12 @@ function formatCommitLine(hash, subject) {
 }
 
 function main() {
+  const githubRepo = resolveGithubRepo()
   const sinceTag = resolveSinceTag(process.argv[2])
   const range = sinceTag ? `${sinceTag}..HEAD` : 'HEAD'
   const count = git(['rev-list', '--count', range])
   if (count === '0') {
-    console.log('## 更新摘要\n\n（自上一版本以来没有新的 commit）\n')
+    console.log('## æ›´æ–°æ‘˜è¦\n\nï¼ˆè‡ªä¸Šä¸€ç‰ˆæœ¬ä»¥æ¥æ²¡æœ‰æ–°çš„ commitï¼‰\n')
     return
   }
 
@@ -97,9 +119,9 @@ function main() {
     buckets[type].push(line)
   }
 
-  const out = ['## 更新摘要', '']
+  const out = ['## æ›´æ–°æ‘˜è¦', '']
   if (sinceTag) {
-    out.push(`自 [\`${sinceTag}\`](https://github.com/KunAgent/Kun/compare/${sinceTag}...HEAD) 以来的变更：`, '')
+    out.push(`è‡ª [\`${sinceTag}\`](https://github.com/${githubRepo}/compare/${sinceTag}...HEAD) ä»¥æ¥çš„å˜æ›´ï¼š`, '')
   }
 
   let wroteSection = false
@@ -111,7 +133,7 @@ function main() {
   }
 
   if (!wroteSection) {
-    out.push('（暂无符合 Conventional Commits 规范的提交，见下方完整 commit 列表）', '')
+    out.push('ï¼ˆæš‚æ— ç¬¦åˆ Conventional Commits è§„èŒƒçš„æäº¤ï¼Œè§ä¸‹æ–¹å®Œæ•´ commit åˆ—è¡¨ï¼‰', '')
     for (const row of log.split('\n').filter(Boolean)) {
       const subject = row.slice(row.indexOf('\t') + 1)
       out.push(`- ${subject}`)
@@ -123,3 +145,4 @@ function main() {
 }
 
 main()
+

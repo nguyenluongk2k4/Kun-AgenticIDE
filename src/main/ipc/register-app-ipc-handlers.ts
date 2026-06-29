@@ -929,10 +929,12 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
 
   ipcMain.handle('kun:sessions:detect-external-sync', async () => {
     const settings = await store.load()
+    const runtime = resolveKunRuntimeSettings(settings)
     return detectExternalSyncSources({
       homeDir: homedir(),
       destDataDir: await resolveKunThreadsDataDir(),
-      defaultWorkspace: settings.workspaceRoot || homedir()
+      defaultWorkspace: settings.workspaceRoot || homedir(),
+      storage: runtime.storage
     })
   })
 
@@ -950,6 +952,7 @@ export function registerAppIpcHandlers(options: RegisterAppIpcHandlersOptions): 
         destDataDir: await resolveKunThreadsDataDir(),
         defaultWorkspace: settings.workspaceRoot || homedir(),
         defaultModel: runtime.model,
+        storage: runtime.storage,
         sourceIds: request.sourceIds,
         includeConversations: request.includeConversations,
         includeMemories: request.includeMemories,
